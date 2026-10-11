@@ -76,7 +76,7 @@ h3.sect:first-child { margin-top: 0; }
 .task-id { font: 700 11px var(--mono); color: var(--gold); padding-top: 2px; }
 .task-title { flex: 1; font-weight: 600; }
 .status { font: 700 10px var(--mono); letter-spacing: 1px; text-transform: uppercase; padding: 2px 7px; border-radius: 6px; background: #20264a; color: var(--muted); white-space: nowrap; }
-.status.planning, .status.queued { background: #3a2f12; color: var(--gold); } .status.active { background: #123a2b; color: var(--green); }
+.status.planning, .status.queued, .status.researching { background: #3a2f12; color: var(--gold); } .status.active { background: #123a2b; color: var(--green); }
 .status.review { background: #2a1d4a; color: #c9a8ff; } .status.done { background: #12343a; color: var(--cyan); } .status.failed, .status.interrupted { background: #3d1620; color: var(--red); }
 .progress { height: 4px; border-radius: 4px; background: #20264a; margin: 8px 0 6px; overflow: hidden; }
 .progress > i { display: block; height: 100%; background: linear-gradient(90deg, var(--pink), var(--gold)); transition: width .4s; }
@@ -179,3 +179,10 @@ button.primary:hover { filter: brightness(1.08); }
   #main { grid-template-columns: 1fr; grid-template-rows: 56vh 60vh; } #side { border-left: 0; border-top: 1px solid var(--line); }
   #task-form { grid-template-columns: 1fr; } .powers { flex-wrap: wrap; }
 }
+
+/* intake */
+.intake { margin: 8px 0; padding: 10px 12px; background: #0e1228; border: 1px solid var(--line); border-radius: 10px; font-size: 12px; }
+.intake .ih { font: 700 10px var(--mono); letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); margin: 10px 0 4px; } .intake .ih:first-child { margin-top: 0; } .intake .ih.q { color: var(--gold); }
+.intake .kv { display: grid; grid-template-columns: 78px 1fr; gap: 3px 10px; } .intake .kv span { color: var(--muted); } .intake .kv b { font-weight: 600; }
+.intake .srcline { margin-top: 8px; color: #b9c1e8; } .intake .srcline.bad { color: #ffb4a0; } .intake a { color: var(--cyan); text-decoration: none; } .intake a:hover { text-decoration: underline; }
+.intake .finds { margin: 4px 0 0; padding-left: 18px; color: #b9c1e8; } .intake .finds li { margin: 2px 0; }

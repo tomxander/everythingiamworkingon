@@ -214,8 +214,22 @@ function taskDetail(t) {
   const subs = t.subtasks.map((s) => `<div class="sub">${avatar(s.agent)}<div class="what"><b data-agent="${s.agent}" style="cursor:pointer">${esc(st.agents[s.agent]?.short || s.agent)}</b> <span class="skill" data-skill="${s.skill}">${s.skill}</span>${s.consult ? ` <span class="muted">· consulted ${esc(nm(s.consult))}</span>` : ''}
         <div class="hl">${esc(s.status === 'done' ? (s.headline || s.instruction) : s.instruction)}</div>${s.review ? `<div class="rv">${esc(nm(s.review.by))}: ${esc(s.review.text)}</div>` : ''}</div>
         <div style="text-align:right"><span class="status ${s.status === 'working' ? 'active' : s.status === 'done' ? 'done' : s.status === 'failed' ? 'failed' : ''}">${s.status}</span>${s.outputId ? `<div><button class="btn sm" data-deliv="${s.outputId}" style="margin-top:4px">Read</button></div>` : ''}</div></div>`).join('');
-  return `${t.brief ? `<div class="plan"><b>Brief:</b> ${esc(t.brief)}</div>` : ''}${t.plan ? `<div class="plan"><b>Plan:</b> ${esc(t.plan.summary)}</div>` : ''}${subs}
-    <div class="row" style="margin-top:10px">${t.summaryId ? `<button class="btn primary" data-deliv="${t.summaryId}">Read executive summary</button>` : ''}${['failed', 'interrupted'].includes(t.status) ? `<button class="btn" data-retry="${t.id}">Retry</button>` : ''}${t.error ? `<span class="muted">${esc(t.error)}</span>` : ''}</div>`;
+  return `${t.brief ? `<div class="plan"><b>Brief:</b> ${esc(t.brief)}</div>` : ''}${intakeHtml(t)}${t.plan ? `<div class="plan"><b>Plan:</b> ${esc(t.plan.summary)}</div>` : ''}${subs}
+    <div class="row" style="margin-top:10px">${t.summaryId ? `<button class="btn primary" data-deliv="${t.summaryId}">Read executive summary</button>` : ''}${t.profileId ? `<button class="btn" data-deliv="${t.profileId}">Client profile</button>` : ''}${['failed', 'interrupted'].includes(t.status) ? `<button class="btn" data-retry="${t.id}">Retry</button>` : ''}${t.error ? `<span class="muted">${esc(t.error)}</span>` : ''}</div>`;
+}
+
+function intakeHtml(t) {
+  const i = t.intake; const src = t.sources || [];
+  if (!i && !src.length) return '';
+  const srcHtml = src.map((x) => x.pages.length
+    ? `<div class="srcline">Read <b>${x.pages.length}</b> page${x.pages.length > 1 ? 's' : ''} of <b>${esc(x.host)}</b>${x.cached ? ' (cached)' : ''}: ${x.pages.map((p) => `<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(new URL(p.url).pathname || '/')}</a>`).join(', ')}</div>${x.findings?.length ? `<ul class="finds">${x.findings.slice(0, 5).map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}`
+    : `<div class="srcline bad">Could not read <b>${esc(x.host)}</b>: ${esc(x.errors?.[0]?.error || 'unknown error')}. Everything about it is marked Not verified.</div>`).join('');
+  if (!i) return `<div class="intake">${srcHtml}</div>`;
+  return `<div class="intake"><div class="ih">Intake brief</div>
+    <div class="kv"><span>Objective</span><b>${esc(i.objective)}</b><span>Metric</span><b>${esc(i.metric)}</b><span>Target</span><b>${esc(i.target)}</b><span>Timeframe</span><b>${esc(i.timeframe)}</b><span>Budget</span><b>${esc(i.budget)}</b></div>
+    ${srcHtml}
+    ${i.assumptions?.length ? `<div class="ih">Assumptions</div><ul class="finds">${i.assumptions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
+    ${i.openQuestions?.length ? `<div class="ih q">Open questions for you</div><ul class="finds">${i.openQuestions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul><div class="muted" style="font-size:11px">Answer these in a new task brief to sharpen the next run.</div>` : ''}</div>`;
 }
 
 // ------------------------------------------------------------ comms panel
@@ -279,7 +293,7 @@ function renderOutput() {
   const p = $('#p-output');
   const list = [...st.deliv.values()].sort((a, b) => b.created - a.created);
   if (!list.length) { p.innerHTML = `<div class="empty"><div class="big">📄</div>Deliverables from the team will appear here, each saved as Markdown in <code>deliverables/</code>.</div>`; return; }
-  p.innerHTML = list.map((d) => `<div class="card deliv" data-id="${d.id}"><div class="tagrow">${avatar(d.agent)}<span class="pill ${d.kind === 'summary' ? 'sum' : ''}">${d.kind === 'summary' ? 'executive summary' : esc(d.skill)}</span><span class="pill">${d.taskId}</span>${d.simulated ? '<span class="pill sim">simulated</span>' : ''}<span>${d.words} words</span></div><div class="t">${esc(d.title)}</div><div class="pv">${esc(d.preview)}</div></div>`).join('');
+  p.innerHTML = list.map((d) => `<div class="card deliv" data-id="${d.id}"><div class="tagrow">${avatar(d.agent)}<span class="pill ${d.kind === 'summary' || d.kind === 'profile' ? 'sum' : ''}">${d.kind === 'summary' ? 'executive summary' : d.kind === 'profile' ? 'client profile' : esc(d.skill)}</span><span class="pill">${d.taskId}</span>${d.simulated ? '<span class="pill sim">simulated</span>' : ''}<span>${d.words} words</span></div><div class="t">${esc(d.title)}</div><div class="pv">${esc(d.preview)}</div></div>`).join('');
   $$('.deliv', p).forEach((c) => (c.onclick = () => send({ type: 'deliverable', id: c.dataset.id })));
 }
 

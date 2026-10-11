@@ -49,18 +49,30 @@ The key can also be entered in the Settings panel. It is held in server memory o
 | Review | Each deliverable receives a structured peer review. The CMO synthesises an executive summary. |
 | Observability | Tasks, inter-agent communications, per-agent status and workload, deliverables, token and cost metering against a budget cap, department output, skill utilisation, and an event log. |
 | Operations view | A live floor plan of the office shows agents moving between workstations as they work, consult and review. Select any agent to inspect their skills, memory and statistics, or message them directly. |
-| Output | Every deliverable is rendered in the interface and saved as Markdown in `deliverables/`. |
+| Output | Every deliverable is rendered in the interface and saved as Markdown in `deliverables/`. Tasks also show the intake brief, the pages read and the open questions. |
 
 ## How work flows
 
 1. **Intake.** A task is submitted and queued. Up to `MAX_ACTIVE_TASKS` run concurrently.
-2. **Plan.** The CMO agent produces a JSON plan assigning each workstream to an agent and one of that agent's skills.
-3. **Execute.** Each agent's system prompt contains the company charter, its persona and recent memory, and the full text of the selected skill. The task brief and upstream deliverables are supplied as the user message. Workstreams may begin with a consult in which the agent asks a colleague a targeted question.
-4. **Review.** A peer reviews each deliverable and records a strength, an improvement and a verdict.
-5. **Synthesise.** The CMO produces an executive summary covering the recommendation, contributions, risks, open decisions and a seven-day plan.
-6. **Persist.** State, deliverables and metrics are saved to `data/` and `deliverables/`.
+2. **Research.** If the request names a website, the research lead reads it: the homepage plus up to five key pages (product, pricing, about, contact, case studies). From those pages it extracts titles, headings, calls to action, forms, contact methods and detected tracking, and writes an evidence-based **client profile**. Profiles are cached per site for six hours and reused by later tasks for the same client.
+3. **Brief.** The CMO turns the request into a structured intake brief: objective, goal type, primary metric, target, timeframe, budget, audience, assumptions and open questions. A one-line instruction such as "get this site more leads" becomes something the team can execute against.
+4. **Plan.** The CMO decomposes the task into 3 to 7 workstreams (owner, skill, instruction, dependencies, optional consult) tailored to the evidence and the goal type. The plan is validated and repaired, with a deterministic fallback planner.
+5. **Execute.** Each agent's system prompt contains the company charter, its persona and memory, the shared client context (intake brief, profile, sources read) and the full text of the selected skill. In live mode agents can also read additional public pages (`fetch_url`) and their skill's reference files.
+6. **Review and revise.** A peer reviews each deliverable and returns a verdict. If the reviewer finds a real problem (unsupported claims, generic advice, or actions that need access the team does not have), the author revises once.
+7. **Synthesise.** The CMO produces an executive summary covering the recommendation, contributions, risks, open questions and a seven-day plan.
+8. **Persist.** State, deliverables, client profiles and metrics are saved to `data/` and `deliverables/`.
 
-Agents work asynchronously and do not ask clarifying questions. They state assumptions explicitly and proceed. Treat deliverables as drafts for human review.
+Agents work asynchronously and do not ask clarifying questions. They state assumptions explicitly, and the open questions are surfaced to you on the task so the next brief can answer them. Treat deliverables as drafts for human review.
+
+## Grounding and limits
+
+- Claims about a client must cite a page the team read. Anything else is labelled **Not verified**.
+- If a site cannot be read (blocked, offline, or rendered entirely client-side), the task proceeds, a warning is shown, and the team is told explicitly that nothing about the site is verified.
+- The team cannot log in to ad platforms, analytics, a CRM or the client's CMS and cannot change a live site. Deliverables are recommendations and ready-to-use assets, with the person who should apply them named.
+- Page reading is limited to public `http(s)` pages. Requests to private, loopback and link-local addresses are blocked, including via redirects and DNS tricks.
+- Traffic, conversion rates, lead quality and the sales process are invisible from outside the company. Provide them in the brief.
+
+**Writing a good request.** Include the site, the goal and a number: *"Get acsiatech.com more qualified leads: 40 enquiries a month within 90 days. Budget $5k. Buyers are OEM procurement leads. Competitors: ..."* The brief field is where the baseline, budget, ideal customer and what has already been tried belong.
 
 ## Execution modes
 
@@ -81,7 +93,9 @@ Live mode has been verified against a local fake of the Messages API (request fo
 | `PRICE_IN`, `PRICE_OUT` | `3`, `15` | USD per million input and output tokens, used for cost estimates. Defaults are placeholders: set them to your actual rates. |
 | `BUDGET_CAP_USD` | `5` | Estimated spend at which live mode reverts to simulation. |
 | `MAX_ACTIVE_TASKS` | `3` | Concurrent tasks. |
+| `API_TIMEOUT_MS` | `180000` | Per-request timeout for model calls. |
 | `PORT`, `HOST` | `4747`, `127.0.0.1` | Server binding. See [Security](#security). |
+| `ALLOW_PRIVATE_FETCH` | unset | Set to `1` only for testing against a local site. Disables the private-address block on page reading. |
 | `DATA_DIR`, `DELIVERABLES_DIR` | `./data`, `./deliverables` | Persistence locations. |
 | `SKILLS_DIR` | `./vendor/marketingskills/skills` | Skill library location. |
 | `ANTHROPIC_BASE_URL` | Anthropic API | Override for proxies or testing. |
@@ -111,7 +125,8 @@ Live mode has been verified against a local fake of the Messages API (request fo
 server/
   index.js     HTTP and WebSocket server, scheduling loops, static files
   company.js   Task pipeline, planner, consults, reviews, synthesis, metrics, persistence
-  llm.js       Messages API client with retries, usage accounting and simulator switch
+  llm.js       Messages API client: tool-use loop, timeouts, retries, truncation recovery, usage accounting
+  tools.js     Safe web reading, site crawler, page analysis, tool definitions for agents
   mock.js      Simulator and keyword playbooks
   roster.js    Agent definitions and company charter
   skills.js    Skill loader and brief-to-skill matching
@@ -135,6 +150,7 @@ The server is authoritative. It streams state to the browser over WebSocket at 1
 ## Security
 
 - The server binds to `127.0.0.1` by default and rejects cross-origin WebSocket connections.
+- Agents can only read public web pages. Private, loopback and link-local addresses are refused at connection time, so redirects and DNS rebinding cannot reach internal services. Page content is treated as untrusted data.
 - There is no authentication. Anyone who can reach the server can issue commands and, if a key is loaded, incur API spend. Do not expose it to untrusted networks without adding access control.
 - API keys are held in process memory only.
 - Model output is escaped before rendering in the browser.
@@ -145,7 +161,7 @@ The server is authoritative. It streams state to the browser over WebSocket at 1
 npm test
 ```
 
-Fifteen tests cover floor-plan connectivity, roster and skill integrity, planning, a complete simulated task, persistence and recovery, idle behaviour, and the live path against a local fake API.
+Twenty-six tests cover floor-plan connectivity, roster and skill integrity, planning and routing, a complete simulated task, persistence and recovery, idle behaviour, safe web fetching (including private-address and redirect protection), site crawling and findings, and the live path against a local fake API: tool use, truncation recovery, review-driven revision, timeouts and unreachable sites.
 
 ## Licence and credits
 
