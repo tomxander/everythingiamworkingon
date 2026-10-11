@@ -690,7 +690,7 @@ export class Company extends EventEmitter {
     return d;
   }
 
-  deliverableMeta(d) { const { markdown, ...rest } = d; return { ...rest, words: markdown.split(/\s+/).length, preview: clip(markdown.replace(/^#.*$/m, '').replace(/\s+/g, ' ').trim(), 220) }; }
+  deliverableMeta(d) { const { markdown, ...rest } = d; return { ...rest, words: markdown.split(/\s+/).length, preview: clip(plainPreview(markdown), 220) }; }
 
   // ---------- God's other powers ----------
   freeAgents() { return [...this.sim.agents.values()].filter((a) => !a.busy && !a.ambientLock); }
@@ -819,6 +819,11 @@ export class Company extends EventEmitter {
       return true;
     } catch (e) { console.error('could not load state', e.message); return false; }
   }
+}
+
+/** Markdown to a one-paragraph plain preview: no headings, quote markers, list bullets, code ticks or emphasis. */
+function plainPreview(md) {
+  return md.replace(/^#.*$/m, '').replace(/^\s*>\s?/gm, '').replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, '').replace(/`+/g, '').replace(/\*\*|__|\*|_(?=\S)|(?<=\S)_/g, '').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/\s+/g, ' ').trim();
 }
 
 function externalToText(ext) {

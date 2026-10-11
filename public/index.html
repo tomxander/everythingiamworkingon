@@ -14,23 +14,23 @@
   <header id="topbar">
     <div class="brand">
       <div class="logo" aria-label="4EVR">4EVR</div>
-      <div class="tag">HQ <span id="tagline"></span></div>
+      <div class="tag" id="tagline"></div>
     </div>
     <div class="top-center">
-      <div class="chip clock" title="Office time. A day lasts 12 real minutes at 1x."><span id="clock-icon">☀</span><span id="clock">Day 1 · 08:30</span></div>
-      <button class="chip mode" id="mode-chip" title="Click to open settings"><span class="dot"></span><span id="mode-label">SIMULATED</span></button>
-      <div class="chip" title="Tokens used this session (estimated in simulated mode)"><b id="tok">0</b> tok</div>
-      <div class="chip" title="Estimated spend vs. budget cap"><b id="cost">$0.00</b><span class="muted"> / <span id="cap">$5</span></span></div>
+      <div class="chip clock" title="Office time. A day lasts 12 real minutes at 1x."><span id="clock-icon"><i data-ico="sun"></i></span><span id="clock">Day 1 · 08:30</span></div>
+      <button class="chip mode" id="mode-chip" title="Click to open settings"><span class="dot"></span><span id="mode-label">Simulated</span></button>
+      <div class="chip" title="Tokens used this session (estimated in simulated mode)"><b id="tok">0</b> tokens</div>
+      <div class="chip" title="Estimated spend against the budget cap"><b id="cost">$0.00</b><span class="muted">of <span id="cap">$5</span></span></div>
     </div>
     <div class="top-right">
       <div class="seg" id="speed">
-        <button data-act="pause" title="Pause (Space)">❚❚</button>
+        <button data-act="pause" title="Pause (Space)" aria-label="Pause"><i data-ico="pause"></i></button>
         <button data-speed="1" class="on">1×</button>
         <button data-speed="2">2×</button>
         <button data-speed="4">4×</button>
       </div>
-      <button class="icon-btn" id="btn-fit" title="Fit office to screen (F)">⤢</button>
-      <button class="icon-btn" id="btn-settings" title="Settings">⚙</button>
+      <button class="icon-btn" id="btn-fit" title="Fit the office to the screen (F)" aria-label="Fit the office to the screen"><i data-ico="fit"></i></button>
+      <button class="icon-btn" id="btn-settings" title="Settings" aria-label="Settings"><i data-ico="settings"></i></button>
     </div>
   </header>
 
@@ -39,20 +39,20 @@
       <canvas id="world" aria-label="4EVR office"></canvas>
       <div id="godvoice" class="godvoice" hidden></div>
       <div id="toasts"></div>
-      <div id="stage-hint">Scroll to zoom · drag to pan · click a person</div>
+      <div id="stage-hint">Scroll to zoom, drag to pan, click a person</div>
       <div id="loading"><div class="logo big">4EVR</div><div class="muted">opening the office…</div></div>
     </section>
 
     <aside id="side">
       <nav id="tabs" role="tablist"><span id="tab-ind"></span>
-        <button data-tab="tasks" class="on">Tasks<i id="n-tasks"></i></button>
-        <button data-tab="inbox">Inbox<i id="n-inbox"></i></button>
-        <button data-tab="comms">Comms</button>
-        <button data-tab="team">Team</button>
-        <button data-tab="brain">Brain<i id="n-brain"></i></button>
-        <button data-tab="output">Output<i id="n-output"></i></button>
-        <button data-tab="metrics">Metrics</button>
-        <button data-tab="log">Log</button>
+        <button data-tab="tasks" class="on" role="tab"><span class="lbl">Tasks<i id="n-tasks"></i></span></button>
+        <button data-tab="inbox" role="tab"><span class="lbl">Inbox<i id="n-inbox"></i></span></button>
+        <button data-tab="comms" role="tab"><span class="lbl">Comms</span></button>
+        <button data-tab="team" role="tab"><span class="lbl">Team</span></button>
+        <button data-tab="brain" role="tab"><span class="lbl">Brain<i id="n-brain"></i></span></button>
+        <button data-tab="output" role="tab"><span class="lbl">Output<i id="n-output"></i></span></button>
+        <button data-tab="metrics" role="tab"><span class="lbl">Stats</span></button>
+        <button data-tab="log" role="tab"><span class="lbl">Log</span></button>
       </nav>
       <div id="panels">
         <div class="panel on" id="p-tasks"></div>
@@ -68,18 +68,18 @@
   </main>
 
   <footer id="console">
-    <div class="console-label"><span class="halo">☼</span> GOD CONSOLE</div>
-    <form id="task-form" autocomplete="off">
-      <input id="task-title" type="text" maxlength="140" placeholder="Include the site, the goal and a number…  e.g. Get acsiatech.com more qualified leads: 40 enquiries a month" />
-      <textarea id="task-brief" rows="1" maxlength="4000" placeholder="Brief (optional): who the customers are, budget, deadline, what is already tried, competitors. The more specific, the better the work."></textarea>
-      <select id="task-assignee" title="Who should do this?"><option value="">Vera plans it</option></select>
-      <select id="task-tpl" title="Quick templates"><option value="">Templates…</option></select>
-      <button class="primary" type="submit">Assign ↵</button>
+    <form id="task-form" autocomplete="off" aria-label="Give the team a task">
+      <label class="console-label" for="task-title">God console</label>
+      <input id="task-title" type="text" maxlength="140" placeholder="Give the team a task: the site, the goal and a number" title="For example: Get acsiatech.com more qualified leads, 40 enquiries a month" />
+      <textarea id="task-brief" rows="1" maxlength="4000" aria-label="Brief" placeholder="Brief (optional): customers, budget, deadline, competitors" title="Who the customers are, budget, deadline, what has been tried, competitors. The more specific, the better the work."></textarea>
+      <select id="task-assignee" aria-label="Who does it" title="Who does it"><option value="">Vera plans it</option></select>
+      <select id="task-tpl" aria-label="Start from a template" title="Start from a template"><option value="">Templates</option></select>
+      <button class="primary assign" type="submit"><i data-ico="enter"></i><span>Assign</span></button>
     </form>
-    <div class="powers">
-      <button id="p-announce" title="Speak to the whole office">📣 Announce</button>
-      <button id="p-coffee" title="Everyone free takes a coffee break">☕ Coffee round</button>
-      <button id="p-town" title="Summon everyone to the Town Hall">🏛 Town Hall</button>
+    <div class="powers" role="group" aria-label="Office actions">
+      <button id="p-announce" class="icon-btn" title="Announce to the whole office" aria-label="Announce to the whole office"><i data-ico="megaphone"></i></button>
+      <button id="p-coffee" class="icon-btn" title="Coffee round: everyone who is free takes a break" aria-label="Coffee round"><i data-ico="coffee"></i></button>
+      <button id="p-town" class="icon-btn" title="Town hall: call everyone together" aria-label="Town hall"><i data-ico="hall"></i></button>
     </div>
   </footer>
 </div>

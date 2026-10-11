@@ -68,9 +68,10 @@ export class Renderer {
     if (!this.userMoved) this.fit();
   }
   fit() {
-    const ww = this.map.W * T, wh = this.map.H * T; const pad = 12;
-    const z = Math.min((this.vw - pad * 2) / ww, (this.vh - pad * 2) / wh);
-    this.cam.zoom = z; this.cam.x = (this.vw - ww * z) / 2; this.cam.y = (this.vh - wh * z) / 2;
+    // leave a lane under the building for the hint, so it never sits on top of the office
+    const ww = this.map.W * T, wh = this.map.H * T; const px = 18, top = 18, bottom = 50;
+    const z = Math.min((this.vw - px * 2) / ww, (this.vh - top - bottom) / wh);
+    this.cam.zoom = z; this.cam.x = (this.vw - ww * z) / 2; this.cam.y = top + (this.vh - top - bottom - wh * z) / 2;
     this.userMoved = false;
   }
   zoomAt(sx, sy, factor) {

@@ -2,6 +2,10 @@ import { Renderer } from './render.js';
 import { personFrame } from './sprites.js';
 import { esc, md, timeStr, clockStr, fmtNum, fmtMoney, el, ago } from './util.js';
 import { TEMPLATES } from './templates.js';
+import { icon } from './icons.js';
+
+// fill the static icon placeholders in index.html from the one icon set
+for (const n of document.querySelectorAll('[data-ico]')) n.outerHTML = icon(n.dataset.ico);
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -61,7 +65,8 @@ function onInit(m) {
   st.tasks = new Map(m.tasks.map((t) => [t.id, t])); st.deliv = new Map(m.deliverables.map((d) => [d.id, d]));
   st.comms = m.comms; st.log = m.log; st.stats = m.stats; st.settings = m.settings; st.snap = m.snapshot; st.kb = m.kb; st.hiring = m.hiring; st.hr = m.hr; st.requests = m.requests || []; st.pendingHires = m.hiring?.pending || [];
   for (const a of m.snapshot.agents) st.live[a.id] = a;
-  $('#tagline').textContent = `· ${m.company.tagline}`;
+  $('#tagline').textContent = m.company.tagline.replace(/\.$/, '');
+  if (matchMedia('(pointer: coarse)').matches) $('#stage-hint').textContent = 'Pinch to zoom, drag to pan, tap a person';
   if (!renderer) {
     renderer = new Renderer($('#world'), m);
     bindStage();
@@ -149,14 +154,15 @@ function selectAgent(id, { open = false, focus = false } = {}) {
 function updateClock() {
   const s = st.snap; if (!s) return;
   $('#clock').textContent = `Day ${s.day} · ${clockStr(s.clock)}`;
-  const h = s.clock / 60; $('#clock-icon').textContent = h >= 6 && h < 19 ? '☀' : '☾';
+  const h = s.clock / 60; const day = h >= 6 && h < 19; if ($('#clock-icon').dataset.day !== String(day)) { $('#clock-icon').dataset.day = String(day); $('#clock-icon').innerHTML = icon(day ? 'sun' : 'moon'); }
   $$('#speed button').forEach((b) => { if (b.dataset.speed) b.classList.toggle('on', !s.paused && Number(b.dataset.speed) === s.speed); if (b.dataset.act === 'pause') b.classList.toggle('on', s.paused); });
 }
+const modelName = (s) => (s.models || []).find((x) => x.id === s.model)?.name?.replace(/^Claude /, '') || s.model;
 function updateTop() {
   const s = st.settings, stt = st.stats; if (!s) return;
   const live = s.mode === 'live' || s.mode === 'cli';
   $('#mode-chip').classList.toggle('live', live);
-  $('#mode-label').textContent = s.mode === 'cli' ? `CLAUDE ACCOUNT · ${s.model}` : live ? `LIVE · ${s.model}` : 'SIMULATED';
+  $('#mode-label').textContent = s.mode === 'cli' ? `Claude account, ${modelName(s)}` : live ? `API key, ${modelName(s)}` : 'Simulated';
   const t = stt?.llm?.totals;
   if (t) { $('#tok').textContent = fmtNum(t.inputTokens + t.outputTokens); $('#cost').textContent = (t.simulated ? '~' : '') + fmtMoney(t.cost); }
   $('#cap').textContent = `$${s.budgetCap}`;
@@ -171,9 +177,13 @@ $('#btn-settings').onclick = () => openSettings();
 
 function updateBadges() {
   const active = [...st.tasks.values()].filter((t) => ['queued', 'researching', 'planning', 'active', 'review', 'stopping'].includes(t.status)).length;
-  $('#n-tasks').textContent = active || '';
-  $('#n-output').textContent = st.unreadOutput || '';
-  $('#n-inbox').textContent = st.requests.filter((r) => r.status === 'open').length || '';
+  // a number only where something is waiting on you; elsewhere a dot says "something is happening or new"
+  const dot = (sel, on, title) => { const e = $(sel); e.textContent = ''; e.classList.toggle('dot', !!on); e.parentElement.parentElement.title = on ? title : ''; };
+  dot('#n-tasks', active, `${active} task${active === 1 ? '' : 's'} running`);
+  dot('#n-output', st.unreadOutput, `${st.unreadOutput} new deliverable${st.unreadOutput === 1 ? '' : 's'}`);
+  const open = st.requests.filter((r) => r.status === 'open').length;
+  $('#n-inbox').textContent = open || ''; $('#n-inbox').parentElement.parentElement.title = open ? `${open} request${open === 1 ? '' : 's'} waiting on you` : '';
+  moveTabIndicator(); // a badge appearing or disappearing changes the tab widths
 }
 
 // ------------------------------------------------------------ tabs
@@ -210,7 +220,7 @@ let tasksQueued = false;
 function renderTasksSoon() { if (tasksQueued) return; tasksQueued = true; setTimeout(() => { tasksQueued = false; renderTasks(); }, 120); }
 
 function avatar(id, extra = '') {
-  const a = st.agents[id]; if (id === 'god') return `<span class="av" style="background:var(--navy);color:#fff">☼</span>`;
+  const a = st.agents[id]; if (id === 'god') return `<span class="av god" title="God">${icon('spark')}</span>`;
   if (!a) return `<span class="av" style="background:#c9d5d9">?</span>`;
   const working = st.live[id]?.busy ? 'working' : '';
   return `<span class="av ${working} ${extra}" style="background:${a.color}" title="${esc(a.name)}">${esc(a.short.slice(0, 2).toUpperCase())}</span>`;
@@ -221,7 +231,7 @@ function renderTasks() {
   const p = $('#p-tasks');
   const tasks = [...st.tasks.values()].sort((a, b) => b.created - a.created);
   if (!tasks.length) {
-    p.innerHTML = `<div class="empty"><div class="big">🏢</div><b>The office is waiting for your command, God.</b><p>Type a task in the God Console below, or pick a template. Vera, the CMO, will plan it and assign specialists.</p><button class="btn primary" id="try-demo">Try a demo task</button></div>`;
+    p.innerHTML = `<div class="empty"><div class="big">${icon('office')}</div><b>The office is waiting for your command, God.</b><p>Type a task in the God Console below, or pick a template. Vera, the CMO, will plan it and assign specialists.</p><button class="btn primary" id="try-demo">Try a demo task</button></div>`;
     $('#try-demo').onclick = () => { applyTemplate(0); $('#task-form').requestSubmit(); };
     return;
   }
@@ -251,15 +261,15 @@ function taskDetail(t) {
   const subs = t.subtasks.map((s) => `<div class="sub">${avatar(s.agent)}<div class="what"><b data-agent="${s.agent}" style="cursor:pointer">${esc(st.agents[s.agent]?.short || s.agent)}</b> <span class="skill" data-skill="${s.skill}">${s.skill}</span>${s.consult ? ` <span class="muted">· consulted ${esc(nm(s.consult))}</span>` : ''}
         <div class="hl">${esc(s.status === 'done' ? (s.headline || s.instruction) : s.instruction)}</div>${s.review ? `<div class="rv">${esc(nm(s.review.by))}: ${esc(s.review.text)}</div>` : ''}${s.status === 'failed' && s.error ? `<div class="rv" style="color:#a1293a;font-style:normal">${esc(s.error)}</div>` : ''}</div>
         <div style="text-align:right"><span class="status ${s.status === 'working' ? 'active' : s.status === 'done' ? 'done' : s.status === 'failed' ? 'failed' : ''}">${s.status}</span>${s.outputId ? `<div><button class="btn sm" data-deliv="${s.outputId}" style="margin-top:4px">Read</button></div>` : ''}</div></div>`).join('');
-  return `${t.brief ? `<div class="plan"><b>Brief:</b> ${esc(t.brief)}</div>` : ''}${(t.warnings || []).map((w) => `<div class="notice warn">⚠ ${esc(w)}</div>`).join('')}${intakeHtml(t)}${teamHtml(t)}${t.plan ? `<div class="plan"><b>Plan:</b> ${esc(t.plan.summary)}</div>` : ''}${subs}
-    <div class="row" style="margin-top:10px">${t.summaryId ? `<button class="btn primary" data-deliv="${t.summaryId}">Read executive summary</button>` : ''}${t.profileId ? `<button class="btn" data-deliv="${t.profileId}">Client profile</button>` : ''}${['failed', 'interrupted', 'cancelled'].includes(t.status) ? `<button class="btn" data-retry="${t.id}">Retry</button>` : ''}${['queued', 'researching', 'planning', 'active', 'review'].includes(t.status) ? `<button class="btn" data-stop="${t.id}">■ Stop</button>` : ''}${t.status === 'stopping' ? '<span class="muted">Stopping…</span>' : `<button class="btn" data-del="${t.id}" style="margin-left:auto">Delete</button>`}</div>${t.error ? `<div class="notice warn" style="white-space:pre-wrap">${esc(t.error)}</div>` : ''}`;
+  return `${t.brief ? `<div class="plan"><b>Brief:</b> ${esc(t.brief)}</div>` : ''}${(t.warnings || []).map((w) => `<div class="notice warn with-ico">${icon('alert')}<span>${esc(w)}</span></div>`).join('')}${intakeHtml(t)}${teamHtml(t)}${t.plan ? `<div class="plan"><b>Plan:</b> ${esc(t.plan.summary)}</div>` : ''}${subs}
+    <div class="task-actions">${t.summaryId ? `<button class="btn primary" data-deliv="${t.summaryId}">Read executive summary</button>` : ''}${t.profileId ? `<button class="btn" data-deliv="${t.profileId}">Client profile</button>` : ''}${['failed', 'interrupted', 'cancelled'].includes(t.status) ? `<button class="btn" data-retry="${t.id}">Retry</button>` : ''}${['queued', 'researching', 'planning', 'active', 'review'].includes(t.status) ? `<button class="btn" data-stop="${t.id}">${icon('stop')}Stop</button>` : ''}${t.status === 'stopping' ? '<span class="muted">Stopping…</span>' : `<button class="btn" data-del="${t.id}" style="margin-left:auto">Delete</button>`}</div>${t.error ? `<div class="notice warn" style="white-space:pre-wrap">${esc(t.error)}</div>` : ''}`;
 }
 
 function teamHtml(t) {
   const meets = t.meetings || []; const decs = t.decisions || []; const hires = (t.hires || []).map((id) => st.agents[id]).filter(Boolean); const learned = (t.learned || []).map((id) => st.kb?.lessons?.find((l) => l.id === id)).filter(Boolean);
   if (!meets.length && !hires.length && !learned.length) return '';
-  const ico = { kickoff: '🚀', alignment: '⚖', retro: '🔁' };
-  const mh = meets.map((m) => `<details class="meet"><summary><span>${ico[m.type] || '💬'} ${esc(m.title)}</span><span class="avatars">${m.participants.slice(0, 8).map((p) => avatar(p)).join('')}</span></summary>
+  const ico = { kickoff: 'flag', alignment: 'scale', retro: 'loop' };
+  const mh = meets.map((m) => `<details class="meet"><summary><span>${icon(ico[m.type] || 'chat')}<span class="meet-t">${esc(m.title)}</span></span><span class="avatars">${m.participants.slice(0, 8).map((p) => avatar(p)).join('')}</span></summary>
       <div class="turns">${m.turns.map((x) => `<div class="turn">${avatar(x.agent)}<div><b>${esc(nm(x.agent))}</b> ${esc(x.text)}</div></div>`).join('') || '<div class="muted">In progress…</div>'}</div></details>`).join('');
   return `<div class="intake">
     ${hires.length ? `<div class="ih">Hired for this task</div>${hires.map((h) => `<div class="srcline">${avatar(h.id)} <b>${esc(h.name)}</b>, ${esc(h.role)}${h.why ? ` — ${esc(h.why)}` : ''}</div>`).join('')}` : ''}
@@ -289,7 +299,7 @@ function renderComms() {
   const f = st.commsFilter;
   const btn = (k, l) => `<button data-f="${k}" class="${f === k ? 'on' : ''}">${l}</button>`;
   const taskOpts = `<option value="all">All tasks</option>${[...st.tasks.values()].sort((a, b) => b.created - a.created).map((t) => `<option value="${t.id}" ${st.commsTask === t.id ? 'selected' : ''}>${t.id} ${esc(t.title.slice(0, 28))}</option>`).join('')}`;
-  p.innerHTML = `<div class="filters">${btn('all', 'All')}${btn('work', 'Work')}${btn('meet', 'Meetings')}${btn('talk', 'Talk')}${btn('research', 'Research')}${btn('banter', 'Banter')}${btn('god', 'God')}<select id="c-task" class="minisel">${taskOpts}</select></div><div id="feed"></div>`;
+  p.innerHTML = `<div class="filters"><div class="chips-row" role="group" aria-label="Show">${btn('all', 'All')}${btn('work', 'Work')}${btn('meet', 'Meetings')}${btn('talk', 'Talk')}${btn('research', 'Research')}${btn('banter', 'Banter')}${btn('god', 'God')}</div><select id="c-task" class="minisel" aria-label="Task">${taskOpts}</select></div><div id="feed"></div>`;
   $('#c-task', p).onchange = (e) => { st.commsTask = e.target.value; renderComms(); };
   $$('.filters button', p).forEach((b) => (b.onclick = () => { st.commsFilter = b.dataset.f; renderComms(); }));
   const feed = $('#feed', p);
@@ -320,7 +330,7 @@ function appendComms(m) {
 // ------------------------------------------------------------ inbox: what the agents need from God
 function renderInbox() {
   const p = $('#p-inbox'); const all = st.requests; const open = all.filter((r) => r.status === 'open'); const done = all.filter((r) => r.status !== 'open');
-  if (!all.length) { p.innerHTML = '<div class="empty"><div class="big">📥</div>Nothing needed yet. When an agent cannot find a document, a data export or an answer itself, it asks here, and carries on with assumptions meanwhile.</div>'; return; }
+  if (!all.length) { p.innerHTML = '<div class="empty"><div class="big">' + icon('inbox') + '</div>Nothing needed yet. When an agent cannot find a document, a data export or an answer itself, it asks here, and carries on with assumptions meanwhile.</div>'; return; }
   const kind = (k) => `<span class="pill kind-${k}">${esc(k)}</span>`;
   const card = (r) => {
     const a = st.agents[r.by]; const ans = r.answer;
@@ -335,7 +345,7 @@ function renderInbox() {
     const n = all.filter((r) => r.taskId === id && r.status === 'answered' && !r.appliedAt).length; const t = st.tasks.get(id);
     return t && ['done', 'failed'].includes(t.status) ? `<div class="apply-bar"><span>${esc(id)}: ${n} answer${n > 1 ? 's' : ''} not applied yet</span><button class="btn primary sm" data-rq-apply="${id}">Apply answers</button></div>` : '';
   }).join('');
-  p.innerHTML = `${apply}${open.length ? `<h3 class="sect">Needs you (${open.length})</h3>${open.map(card).join('')}` : '<div class="empty" style="padding:18px"><div class="big">✅</div>Nothing is waiting on you.</div>'}${done.length ? `<h3 class="sect">Answered</h3>${done.slice(0, 30).map(card).join('')}` : ''}`;
+  p.innerHTML = `${apply}${open.length ? `<h3 class="sect">Needs you (${open.length})</h3>${open.map(card).join('')}` : '<div class="empty" style="padding:18px"><div class="big">' + icon('check') + '</div>Nothing is waiting on you.</div>'}${done.length ? `<h3 class="sect">Answered</h3>${done.slice(0, 30).map(card).join('')}` : ''}`;
   $$('[data-rq-send]', p).forEach((b) => (b.onclick = () => { const id = b.dataset.rqSend; send({ type: 'answerRequest', id, text: $(`[data-rq-text="${id}"]`, p).value, files: st.rqFiles[id] || [] }); delete st.rqFiles[id]; }));
   $$('[data-rq-no]', p).forEach((b) => (b.onclick = () => send({ type: 'answerRequest', id: b.dataset.rqNo, decline: true })));
   $$('[data-rq-apply]', p).forEach((b) => (b.onclick = () => { b.disabled = true; b.textContent = 'Applying…'; send({ type: 'applyAnswers', taskId: b.dataset.rqApply }); }));
@@ -351,7 +361,7 @@ function hrPanel() {
   const h = st.hr; if (!h) return '';
   const rel = (h.releases || []).filter((r) => r.status === 'pending').map((r) => `<div class="card hirereq"><b>Nia proposes releasing ${esc(r.name)}</b><div class="muted">${esc(r.reason)}</div><div class="row" style="margin-top:6px"><button class="btn primary sm" data-rd="${r.id}" data-ok="1">Approve release</button><button class="btn sm" data-rd="${r.id}" data-ok="0">Keep</button></div></div>`).join('');
   const rep = (h.reports || [])[0]; const revs = (h.reviews || []).slice(0, 4);
-  return `${rel}<details class="card"><summary><b>People &amp; Talent</b> <span class="muted">· ${h.facts.headcount}/${h.facts.caps.headcount} desks · ${h.facts.hiredNow}/${h.facts.caps.total} hires used · ${h.facts.unowned.marketing} marketing and ${h.facts.unowned.hr} HR library skills unowned</span></summary>
+  return `${rel}<details class="card"><summary><b>People &amp; Talent</b><span class="sum-meta">${h.facts.headcount} of ${h.facts.caps.headcount} desks filled, ${h.facts.hiredNow} of ${h.facts.caps.total} hires used</span></summary>
     <div class="row" style="margin:6px 0"><button class="btn sm" id="hr-report">Workforce report</button><button class="btn sm" id="hr-reviews">Review everyone</button></div>
     ${rep ? `<div class="muted" style="font-size:12px">Latest report: ${esc(new Date(rep.at).toLocaleString())} · ${esc(rep.recommendations[0] || '')}</div>` : '<div class="muted" style="font-size:12px">No workforce report yet. One is written every five finished tasks.</div>'}
     ${revs.map((r) => `<div style="margin-top:6px;font-size:12px"><b>${esc(r.name)}</b> <span class="pill">${esc(r.rating)}</span><div class="muted">${esc(r.narrative)}</div></div>`).join('')}
@@ -364,12 +374,12 @@ function renderTeam() {
   const pend = (st.pendingHires || []).map((r) => `<div class="card hirereq"><b>${esc(st.agents[r.by]?.short || r.by)} wants to hire a ${esc(r.role)}</b><div class="muted">${esc(r.why)}</div><div class="muted">Skills: ${esc((r.skills || []).join(', '))}</div><div class="row" style="margin-top:6px"><button class="btn primary sm" data-hd="${r.id}" data-ok="1">Approve</button><button class="btn sm" data-hd="${r.id}" data-ok="0">Decline</button></div></div>`).join('');
   const kids = (id) => st.order.filter((x) => st.agents[x].reportsTo === id);
   const node = (id, depth = 0) => `<div class="org" style="margin-left:${depth * 14}px" data-sel="${id}">${avatar(id)}<b>${esc(st.agents[id].short)}</b><span class="muted">${esc(st.agents[id].role)}</span>${st.agents[id].hired ? '<em class="tagnew">hired</em>' : ''}</div>${kids(id).map((k) => node(k, depth + 1)).join('')}`;
-  p.innerHTML = `${pend}${hrPanel()}<div class="card"><div class="row" style="justify-content:space-between"><div><b>${h ? h.headcount : st.order.length} people</b> <span class="muted">· ${h ? h.hired : 0} hired · ${h ? h.freeDesks : 0} free desks in the Annex · hiring: ${esc(st.settings?.hiring || 'auto')}</span></div><button class="btn sm" id="t-hire">+ Hire someone</button></div>
+  p.innerHTML = `${pend}${hrPanel()}<div class="card"><div class="row" style="justify-content:space-between"><div><b>${h ? h.headcount : st.order.length} people</b><span class="sum-meta">${h ? h.hired : 0} hired so far, ${h ? h.freeDesks : 0} free desks in the Annex</span></div><button class="btn sm" id="t-hire">+ Hire someone</button></div>
     <details class="orgchart"><summary>Org chart</summary>${st.order.filter((id) => !st.agents[id].reportsTo).map((id) => node(id)).join('')}</details></div>`
     + Object.entries(byDept).map(([d, ids]) => `<div class="dept-title" style="color:${st.init.depts[d].color}"><i style="background:${st.init.depts[d].color}"></i>${esc(st.init.depts[d].label)}</div>` + ids.map((id) => {
       const a = st.agents[id]; const rep = a.reportsTo ? st.agents[a.reportsTo]?.short : null;
       return `<div class="person" data-id="${id}"><canvas width="48" height="72" data-av="${id}"></canvas><div><div class="nm">${esc(a.name)} ${a.lead ? '<em class="taglead">lead</em>' : ''}${a.hired ? '<em class="tagnew">hired</em>' : ''}</div><div class="rl">${esc(a.role)}${rep ? ` · reports to ${esc(rep)}` : ''}</div><div class="st" data-st="${id}"></div>
-      <div class="bars"><span>EN</span><div class="bar en"><i data-en="${id}"></i></div><span>MO</span><div class="bar mo"><i data-mo="${id}"></i></div></div></div></div>`;
+      <div class="bars"><span>Energy</span><div class="bar en" role="meter" aria-label="Energy"><i data-en="${id}"></i></div><span>Mood</span><div class="bar mo" role="meter" aria-label="Mood"><i data-mo="${id}"></i></div></div></div></div>`;
     }).join('')).join('');
   $$('canvas[data-av]', p).forEach((c) => { const a = st.agents[c.dataset.av]; const ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = false; ctx.drawImage(personFrame(a.id, a.look, 'down', 'stand', 0), 0, 0, 48, 72); });
   $$('.person', p).forEach((c) => (c.onclick = () => { selectAgent(c.dataset.id, { focus: true, open: true }); }));
@@ -384,7 +394,7 @@ function updateTeam() {
   const p = $('#p-team');
   for (const id of st.order) {
     const l = st.live[id]; if (!l) continue;
-    const s = $(`[data-st="${id}"]`, p); if (s) s.textContent = (l.busy ? '● ' : '') + l.status;
+    const s = $(`[data-st="${id}"]`, p); if (s) s.innerHTML = `${l.busy ? '<span class="live-dot"></span>' : ''}${esc(l.status)}`;
     const en = $(`[data-en="${id}"]`, p), mo = $(`[data-mo="${id}"]`, p);
     if (en) en.style.width = `${l.energy}%`; if (mo) mo.style.width = `${l.mood}%`;
   }
@@ -394,20 +404,19 @@ function updateTeam() {
 // ------------------------------------------------------------ brain (what the company has learned)
 function renderBrain() {
   const p = $('#p-brain'); const kb = st.kb; if (!kb) return;
-  const sm = kb.summary; const ap = sm.approval; const mode = st.settings?.learning || sm.mode;
+  const sm = kb.summary; const ap = sm.approval; const fresh = !sm.active && !sm.retired && !sm.studySessions && !sm.promoted; const mode = st.settings?.learning || sm.mode;
   const pct = (v, n) => (v == null ? '–' : `${v}%`) + (n ? ` <small>n=${n}</small>` : '');
   const f = st.brainFilter; const q = st.brainQuery.toLowerCase();
   const lessons = kb.lessons.filter((l) => (f === 'all' || (f === 'web' ? l.unverified : f === 'pinned' ? l.pinned : l.scope === f)) && (!q || l.text.toLowerCase().includes(q) || (l.skill || '').includes(q)));
   const chip = (k, t) => `<button data-bf="${k}" class="${f === k ? 'on' : ''}">${t}</button>`;
   const learnHelp = { active: 'Learns from reviews, retrospectives and by studying the web in idle time.', passive: 'Learns from reviews and retrospectives only. No web study.', off: 'Nothing is recorded or injected.' }[mode];
   p.innerHTML = `
-    <div class="tiles">
+    ${fresh ? `<div class="empty" style="padding:22px 12px"><div class="big">${icon('spark')}</div><b>Nothing learned yet.</b><p>Lessons appear here after the first peer reviews and retrospectives. Each one is scored by whether the work it influenced got approved.</p></div>` : `<div class="tiles">
       <div class="tile"><div class="k">Lessons</div><div class="v">${sm.active}</div></div><div class="tile"><div class="k">Avg. score</div><div class="v">${Math.round(sm.avgScore * 100)}<small>%</small></div></div><div class="tile"><div class="k">Playbooks</div><div class="v">${sm.playbooks}</div></div>
-      <div class="tile"><div class="k">Promoted</div><div class="v">${sm.promoted}</div></div><div class="tile"><div class="k">Retired</div><div class="v">${sm.retired}</div></div><div class="tile"><div class="k">Studied</div><div class="v">${sm.studySessions}</div></div>
-    </div>
-    <div class="card" style="margin-top:10px"><div class="k muted" style="font:10px var(--mono);letter-spacing:1px;text-transform:uppercase">Does learning help? First-pass approval</div>
+      <div class="tile"><div class="k">Promoted</div><div class="v">${sm.promoted}</div></div><div class="tile"><div class="k">Retired</div><div class="v">${sm.retired}</div></div><div class="tile"><div class="k">Studied</div><div class="v">${sm.studySessions}</div></div></div>`}
+    ${fresh ? '' : `<div class="card" style="margin-top:10px"><div class="card-h">Does learning help? First-pass approval</div>
       <div class="row" style="gap:18px;margin-top:4px"><div>With lessons applied <b style="font-size:18px">${pct(ap.withLessons, ap.nWith)}</b></div><div>Without <b style="font-size:18px">${pct(ap.without, ap.nWithout)}</b></div></div>
-      <div class="muted" style="font-size:11px;margin-top:4px">Measured on real reviews. Treat it as a trend once each side has 10 or more.</div></div>
+      <div class="muted" style="font-size:11px;margin-top:4px">Measured on real reviews. Treat it as a trend once each side has 10 or more.</div></div>`}
     <div class="card"><div class="row" style="justify-content:space-between"><b>Learning: ${esc(mode)}</b><span class="seg" id="b-mode">${['active', 'passive', 'off'].map((m) => `<button data-m="${m}" class="${m === mode ? 'on' : ''}">${m}</button>`).join('')}</span></div><div class="muted" style="margin-top:6px;font-size:12px">${esc(learnHelp)} Lessons are scored by whether the work they influenced was approved: useful ones are promoted from you to your team to the company, weak ones are retired, and clusters become house playbooks. Ideas from the web stay unverified until they help.</div></div>
     ${sm.sources?.length ? `<h3 class="sect">Which kinds of lessons help <span class="muted">· the system learns how to learn</span></h3>${sm.sources.map((x) => `<div class="drow"><span>${esc(x.source)}</span><div class="bar mo"><i style="width:${x.rate}%"></i></div><span class="n">${x.rate}% · ×${x.weight}</span></div>`).join('')}<div class="muted" style="font-size:11.5px;margin:4px 0 8px">Share of approved work that each kind of lesson influenced, and the weight it now gets when lessons are chosen. Studying the web runs at ×${sm.studyFactor} of its normal rate.</div>` : ''}
     ${kb.events.length ? `<h3 class="sect">Recent learning</h3>${[...kb.events].reverse().slice(0, 5).map((e) => `<div class="log"><span class="tm">${timeStr(e.t)}</span><span>${esc(e.text)}</span></div>`).join('')}` : ''}
@@ -428,13 +437,16 @@ function renderBrain() {
 
 function openHireForm() {
   const skills = st.init.skills.map((k) => k.name);
-  openModal(`<button class="btn close">✕</button><h2>Hire someone</h2><div class="muted">They get a desk in the Annex and join the team. The CMO and the leads can also hire when a task needs it (hiring mode: ${esc(st.settings?.hiring || 'auto')}).</div>
-    <form id="hire-form"><label class="field-label">Job title</label><input class="field" id="h-role" maxlength="60" placeholder="e.g. Marine Industry Strategist (optional when a library playbook is matched)" />
-    <label class="field-label">Describe what is needed <span class="muted">(the matching playbooks are found in the skills library, which is checked for updates first)</span></label><textarea class="field" id="h-need" rows="2" maxlength="300" placeholder="e.g. marketing for shipping and marine logistics companies"></textarea>
-    <label class="field-label">…or name the skills (comma separated, optional)</label><input class="field" id="h-skills" list="h-skill-list" placeholder="customer-research, competitors" /><datalist id="h-skill-list">${skills.map((k) => `<option value="${k}">`).join('')}</datalist>
-    <label class="field-label">Domain (optional, one word)</label><input class="field" id="h-domain" maxlength="24" placeholder="marine" />
-    <label class="field-label">Why</label><textarea class="field" id="h-why" rows="2" maxlength="240" placeholder="What the team is missing"></textarea>
-    <div class="row" style="margin-top:14px"><button class="btn primary">Hire</button></div></form>`, 'hire');
+  openModal(`<button class="btn close" aria-label="Close">${icon('close')}</button><h2>Hire someone</h2><p class="help">The new person gets a desk in the Annex and joins the team. The CMO and team leads also hire on their own when a task needs it.</p>
+    <form id="hire-form">
+    <label class="field-label" for="h-need">What do you need them for?</label><textarea class="field" id="h-need" rows="2" maxlength="300" placeholder="For example: marketing for shipping and marine logistics companies"></textarea>
+    <p class="help">They are built from the playbooks in the skills library that match this, after checking the library for updates.</p>
+    <label class="field-label" for="h-skills">Or name the skills <span class="opt">optional</span></label><input class="field" id="h-skills" list="h-skill-list" placeholder="For example: customer-research, competitors" /><datalist id="h-skill-list">${skills.map((k) => `<option value="${k}">`).join('')}</datalist>
+    <div class="grid2"><div><label class="field-label" for="h-role">Job title <span class="opt">optional</span></label><input class="field" id="h-role" maxlength="60" placeholder="Marine Industry Strategist" /></div>
+    <div><label class="field-label" for="h-domain">Industry <span class="opt">optional</span></label><input class="field" id="h-domain" maxlength="24" placeholder="marine" /></div></div>
+    <label class="field-label" for="h-why">Why the team needs them</label><textarea class="field" id="h-why" rows="2" maxlength="240" placeholder="What the team is missing today"></textarea>
+    <div class="form-actions"><button type="button" class="btn" data-cancel>Cancel</button><button class="btn primary">Hire</button></div></form>`, 'hire');
+  $('[data-cancel]').onclick = () => closeModal();
   $('#hire-form').onsubmit = (e) => { e.preventDefault(); const role = $('#h-role').value.trim(), need = $('#h-need').value.trim(), skills = $('#h-skills').value.split(/[,\s]+/).filter(Boolean); if (!skills.length && !need) { toast('Describe the need or name at least one skill.', 'warn'); return; } send({ type: 'hire', role, need, skills, why: $('#h-why').value.trim(), domain: $('#h-domain').value.trim() || null }); closeModal(); };
 }
 
@@ -444,7 +456,7 @@ function renderOutputSoon() { if (outQueued) return; outQueued = true; setTimeou
 function renderOutput() {
   const p = $('#p-output');
   const list = [...st.deliv.values()].sort((a, b) => b.created - a.created);
-  if (!list.length) { p.innerHTML = `<div class="empty"><div class="big">📄</div>Deliverables from the team will appear here, each saved as Markdown in <code>deliverables/</code>.</div>`; return; }
+  if (!list.length) { p.innerHTML = `<div class="empty"><div class="big">${icon('doc')}</div>Deliverables from the team will appear here, each saved as Markdown in <code>deliverables/</code>.</div>`; return; }
   p.innerHTML = list.map((d) => `<div class="card deliv" data-id="${d.id}"><div class="tagrow">${avatar(d.agent)}<span class="pill ${d.kind === 'summary' || d.kind === 'profile' || d.kind === 'hr' ? 'sum' : ''}">${d.kind === 'summary' ? 'executive summary' : d.kind === 'profile' ? 'client profile' : d.kind === 'hr' ? 'workforce report' : esc(d.skill)}</span><span class="pill">${d.taskId}</span>${d.simulated ? '<span class="pill sim">simulated</span>' : ''}<span>${d.words} words</span></div><div class="t">${esc(d.title)}</div><div class="pv">${esc(d.preview)}</div></div>`).join('');
   $$('.deliv', p).forEach((c) => (c.onclick = () => send({ type: 'deliverable', id: c.dataset.id })));
 }
@@ -461,7 +473,7 @@ function renderMetrics() {
   p.innerHTML = `
     <div class="tiles">
       ${tile('Tasks done', s.completed, `of ${s.tasks}`)}${tile('Deliverables', s.deliverables)}${tile('Active', s.active, `+${s.queued} queued`)}
-      ${tile('Tokens', fmtNum(t.inputTokens + t.outputTokens), t.simulated ? 'est.' : '')}${tile('Spend', (t.simulated ? '~' : '') + fmtMoney(t.cost), `/ $${s.budgetCap}`)}${tile('API calls', t.calls)}
+      ${tile('Tokens', fmtNum(t.inputTokens + t.outputTokens), t.simulated ? 'est.' : '')}${tile(`Spend, cap $${s.budgetCap}`, (t.simulated ? '~' : '') + fmtMoney(t.cost))}${tile('API calls', t.calls)}
       ${tile('Morale', s.morale + '%')}${tile('Energy', s.energy + '%')}${tile('Cached', fmtNum(t.cacheReadTokens), 'tok')}
       ${tile('People', s.hiring?.headcount ?? '', `${s.hiring?.hired ?? 0} hired`)}${tile('Lessons', s.learning?.active ?? 0, `${s.learning?.playbooks ?? 0} playbooks`)}${tile('Study', s.learning?.studySessions ?? 0, 'sessions')}
     </div>
@@ -469,7 +481,7 @@ function renderMetrics() {
     <h3 class="sect">Token usage over time</h3>${spark(hist.map((h) => h.tokens), '#5ee7ff')}
     <h3 class="sect">Deliverables over time</h3>${spark(hist.map((h) => h.delivs), '#ff6ec7')}
     <h3 class="sect">Departments</h3>
-    ${depts.map((d) => `<div class="drow"><span style="color:${d.color}">● ${esc(d.label)}</span><div class="bar mo"><i style="width:${(d.deliverables / maxTasks) * 100}%;background:${d.color}"></i></div><span class="n">${d.deliverables} out · ${d.working}/${d.n} busy</span></div>`).join('')}
+    ${depts.map((d) => `<div class="drow"><span><span class="dot" style="background:${d.color}"></span>${esc(d.label)}</span><div class="bar mo"><i style="width:${(d.deliverables / maxTasks) * 100}%;background:${d.color}"></i></div><span class="n">${d.deliverables} out · ${d.working}/${d.n} busy</span></div>`).join('')}
     <h3 class="sect">The Skill Vault <span class="muted">· ${st.init.skills.length} playbooks · brighter = used more</span></h3>
     <input class="search" id="skill-search" placeholder="Search skills…" />
     <div class="vault" id="vault"></div>`;
@@ -504,21 +516,21 @@ modal.addEventListener('pointerdown', (e) => { if (e.target === modal) closeModa
 
 function openDeliverable(d) {
   const a = st.agents[d.agent];
-  openModal(`<button class="btn close">✕</button><div class="tagrow">${avatar(d.agent)}<b>${esc(a?.name || d.agent)}</b><span class="pill">${esc(d.skill)}</span><span class="pill">${d.taskId}</span>${d.simulated ? '<span class="pill sim">simulated</span>' : ''}</div>
+  openModal(`<button class="btn close" aria-label="Close">${icon('close')}</button><div class="tagrow">${avatar(d.agent)}<b>${esc(a?.name || d.agent)}</b><span class="pill">${esc(d.skill)}</span><span class="pill">${d.taskId}</span>${d.simulated ? '<span class="pill sim">simulated</span>' : ''}</div>
     <div class="md">${md(d.markdown)}</div><div class="row" style="margin-top:16px"><a class="btn" href="/api/deliverable/${d.id}.md" download>Download .md</a><button class="btn" id="copy-md">Copy Markdown</button></div>`, 'deliv', true);
   $('#copy-md').onclick = (e) => { navigator.clipboard?.writeText(d.markdown).then(() => (e.target.textContent = 'Copied')); };
 }
 function openSkill(s) {
-  openModal(`<button class="btn close">✕</button><h2>${esc(s.title)}</h2><div class="muted" style="margin-bottom:10px">skill: <code>${esc(s.name)}</code> · from coreyhaines31/marketingskills</div>
+  openModal(`<button class="btn close" aria-label="Close">${icon('close')}</button><h2>${esc(s.title)}</h2><p class="help">Skill <code>${esc(s.name)}</code>, from the ${s.source === 'hr' ? 'tuanductran/hr-skills' : 'coreyhaines31/marketingskills'} library</p>
     <div class="notice">${esc(s.description)}</div><div class="md">${md(s.body)}</div>`, 'skill', true);
 }
 
 function openInspector(id) {
   const a = st.agents[id];
-  openModal(`<button class="btn close">✕</button><div class="insp"><canvas id="insp-av" width="48" height="72"></canvas><div>
+  openModal(`<button class="btn close" aria-label="Close">${icon('close')}</button><div class="insp"><canvas id="insp-av" width="48" height="72"></canvas><div>
     <h2>${esc(a.name)} ${a.lead ? '<em class="taglead">lead</em>' : ''}${a.hired ? '<em class="tagnew">hired</em>' : ''}</h2><div class="muted">${esc(a.role)} · ${esc(st.init.depts[a.dept]?.label || a.dept)}${a.reportsTo ? ` · reports to ${esc(st.agents[a.reportsTo]?.name || a.reportsTo)}` : ''}${a.domains?.length ? ` · domain: ${esc(a.domains.join(', '))}` : ''}</div>
     <p>${esc(a.persona)}</p><div id="insp-live" class="notice"></div>
-    <div class="row"><button class="btn" id="i-follow">Follow</button><button class="btn" id="i-bless">✨ Bless</button><button class="btn" id="i-smite">⚡ Smite (lightly)</button><button class="btn primary" id="i-task">Assign task</button>${a.hired ? '<button class="btn" id="i-fire">Let go</button>' : ''}</div></div></div>
+    <div class="row"><button class="btn" id="i-follow">Follow</button><button class="btn" id="i-bless">${icon('spark')}Bless</button><button class="btn" id="i-smite">${icon('bolt')}Smite, lightly</button><button class="btn primary" id="i-task">Assign task</button>${a.hired ? '<button class="btn" id="i-fire">Let go</button>' : ''}</div></div></div>
     <h3 class="sect" style="margin-top:18px">Skills</h3><div class="chips">${a.skills.map((k) => `<span class="skill" data-skill="${k}">${k}</span>`).join('')}</div>
     <h3 class="sect">Talk to ${esc(a.short)}</h3><form class="row" id="i-chat"><input class="field" style="flex:1" id="i-chat-text" placeholder="Say something to ${esc(a.short)}…" maxlength="500"/><button class="btn">Send</button></form><div id="i-reply" class="muted" style="margin-top:6px"></div>
     ${a.jd ? `<h3 class="sect">Job description</h3><div class="md">${md(a.jd)}</div><h3 class="sect">30/60/90 plan</h3>${(a.onboarding || []).map((p) => `<div class="srcline"><b>${esc(p.phase)}</b>: ${esc(p.goals.join('; '))}</div>`).join('')}` : ''}
@@ -537,7 +549,7 @@ function updateInspector() {
   const id = st.selected; const a = st.agents[id]; const l = st.live[id]; if (!a || !l) return;
   const live = $('#insp-live'); if (!live) return;
   const s = st.stats?.agents?.find((x) => x.id === id);
-  live.innerHTML = `<b>${l.busy ? '● Working' : 'Free'}</b> · ${esc(l.status)}<br><span class="muted">Energy ${l.energy}% · Mood ${l.mood}%${s ? ` · ${s.stats.deliverables} deliverables · ${fmtNum(s.stats.tokens)} tokens · ${s.stats.consults} consults` : ''}</span>`;
+  live.innerHTML = `<b>${l.busy ? '<span class="live-dot"></span>Working' : 'Free'}</b> · ${esc(l.status)}<br><span class="muted">Energy ${l.energy}% · Mood ${l.mood}%${s ? ` · ${s.stats.deliverables} deliverables · ${fmtNum(s.stats.tokens)} tokens · ${s.stats.consults} consults` : ''}</span>`;
   const mem = $('#insp-mem'); if (mem && s) mem.innerHTML = s.memory.length ? [...s.memory].reverse().map((m) => `<div class="mem">${esc(m.text)}</div>`).join('') : '<div class="muted">Nothing yet.</div>';
   const les = $('#insp-les'); if (les) { const mine = (st.kb?.lessons || []).filter((l) => l.agent === id).slice(0, 6); les.innerHTML = mine.length ? mine.map((l) => `<div class="mem">${esc(l.text)} <span class="muted">(${Math.round(l.score * 100)}%${l.unverified ? ', unverified' : ''})</span></div>`).join('') : '<div class="muted">Nothing yet. Lessons appear after reviews.</div>'; }
   const last = [...st.comms].reverse().find((m) => m.kind === 'dm' && m.from === id);
@@ -550,20 +562,32 @@ function refreshSettings() { if (!$('#modal').hidden && $('#modal-card').dataset
 function openSettings() {
   const s = st.settings; if (!s) return;
   if (s.hasKey && !st.modelsAsked) { st.modelsAsked = true; send({ type: 'listModels' }); }
-  openModal(`<button class="btn close">✕</button><h2>Settings</h2><div class="muted">How the agents think.</div>
-    ${modeNotice(s)}
-    <label class="field-label">Anthropic API key ${s.hasKey ? '<span style="color:var(--green)">· set (held in server memory only)</span>' : ''}</label>
-    <div class="row"><input class="field" style="flex:1" id="s-key" type="password" placeholder="${s.hasKey ? '•••••••• (leave blank to keep)' : 'sk-ant-…'}" autocomplete="off" /><button class="btn primary" id="s-save">${s.hasKey ? 'Update & go live' : 'Save & go live'}</button></div>
-    ${modelPicker(s)}
-    <label class="field-label">Budget cap (USD, estimated)</label><div class="row"><input class="field" style="flex:1" id="s-budget" type="number" min="0.1" step="0.5" value="${s.budgetCap}" /><button class="btn" id="s-budget-save">Set</button></div>
-    <label class="field-label">Team conversation (cost vs. realism)</label><div class="row">${['full', 'lean', 'off'].map((m) => `<button class="btn ${s.collab === m ? 'primary' : ''}" data-collab="${m}">${m}</button>`).join('')}</div><div class="muted" style="font-size:11.5px;margin-top:4px">full: kickoff, handoffs, consults, alignment meetings. lean: fewer calls. off: agents just work. Each conversation turn is a small model call in live mode.</div>
-    <label class="field-label">Hiring</label><div class="row">${['auto', 'ask', 'off'].map((m) => `<button class="btn ${s.hiring === m ? 'primary' : ''}" data-hiring="${m}">${m}</button>`).join('')}</div><div class="muted" style="font-size:11.5px;margin-top:4px">auto: the CMO and agents hire within the caps. ask: you approve each hire. off: no hiring.</div>
-    <label class="field-label">Learning</label><div class="row">${['active', 'passive', 'off'].map((m) => `<button class="btn ${s.learning === m ? 'primary' : ''}" data-learning="${m}">${m}</button>`).join('')}</div><div class="muted" style="font-size:11.5px;margin-top:4px">active: also studies the web in idle time. passive: reviews and retrospectives only. off: nothing recorded.</div>
-    ${skillsBlock(s)}
-    <label class="field-label">Mode</label><div class="modes"><button class="btn ${s.mode === 'mock' ? 'primary' : ''}" id="s-mock">Simulated</button><button class="btn ${s.mode === 'live' ? 'primary' : ''}" id="s-live" ${s.hasKey ? '' : 'disabled'}>API key</button><button class="btn ${s.mode === 'cli' ? 'primary' : ''}" id="s-cli" ${s.cli?.available || !s.cli?.checked ? '' : 'disabled'}>Claude account</button>${s.mode !== 'mock' ? '<button class="btn" id="s-test">Test connection</button>' : ''}</div>
-    ${connectorsBlock(s)}
-    ${s.lastError ? `<div class="notice warn">Last API error: ${esc(s.lastError)}</div>` : ''}
-    <div class="notice" style="margin-top:16px">Your API key is never written to disk; you can also set <code>ANTHROPIC_API_KEY</code> before starting. Cost figures are estimates from list prices; set <code>PRICE_IN</code> / <code>PRICE_OUT</code> if your rates differ.</div>`, 'settings');
+  const seg = (key, current, opts) => `<div class="seg wide" role="radiogroup">${opts.map(([v, label]) => `<button role="radio" aria-checked="${current === v}" class="${current === v ? 'on' : ''}" data-${key}="${v}">${label}</button>`).join('')}</div>`;
+  const help = (t) => `<p class="help">${t}</p>`;
+  openModal(`<button class="btn close" aria-label="Close">${icon('close')}</button><h2>Settings</h2>
+    <section class="set-sec"><h3 class="set-h">How the agents run</h3>
+      <div class="seg wide" role="radiogroup"><button role="radio" aria-checked="${s.mode === 'mock'}" class="${s.mode === 'mock' ? 'on' : ''}" id="s-mock">Simulated</button><button role="radio" aria-checked="${s.mode === 'live'}" class="${s.mode === 'live' ? 'on' : ''}" id="s-live" ${s.hasKey ? '' : 'disabled title="Add an API key below first"'}>API key</button><button role="radio" aria-checked="${s.mode === 'cli'}" class="${s.mode === 'cli' ? 'on' : ''}" id="s-cli" ${s.cli?.available || !s.cli?.checked ? '' : 'disabled title="The Claude CLI was not found"'}>Claude account</button></div>
+      ${modeNotice(s)}
+      <label class="field-label" for="s-key">Anthropic API key ${s.hasKey ? '<span class="ok-tag">Saved for this session</span>' : ''}</label>
+      <div class="row"><input class="field" style="flex:1" id="s-key" type="password" placeholder="${s.hasKey ? 'Leave blank to keep the current key' : 'sk-ant-…'}" autocomplete="off" /><button class="btn primary" id="s-save">${s.hasKey ? 'Update and use key' : 'Save and use key'}</button></div>
+      ${modelPicker(s)}
+      <label class="field-label" for="s-budget">Budget cap (estimated, USD)</label>
+      <div class="row"><input class="field" style="flex:1" id="s-budget" type="number" min="0.1" step="0.5" value="${s.budgetCap}" /><button class="btn" id="s-budget-save">Set cap</button></div>
+      ${help('When estimated spend reaches the cap, the office switches back to Simulated.')}
+      ${s.mode !== 'mock' ? '<div class="row" style="margin-top:10px"><button class="btn" id="s-test">Test connection</button></div>' : ''}
+      ${s.lastError ? `<div class="notice warn">Last error from the model: ${esc(s.lastError)}</div>` : ''}
+      ${connectorsBlock(s)}
+    </section>
+    <section class="set-sec"><h3 class="set-h">How the team behaves</h3>
+      <label class="field-label">Team conversation</label>${seg('collab', s.collab, [['full', 'Full'], ['lean', 'Lean'], ['off', 'Off']])}
+      ${help('Full: kickoffs, handoffs, consults and alignment meetings. Lean: fewer calls. Off: agents just work. Each conversation turn is a small model call.')}
+      <label class="field-label">Hiring</label>${seg('hiring', s.hiring, [['auto', 'Automatic'], ['ask', 'Ask me'], ['off', 'Off']])}
+      ${help('Automatic: the CMO and agents hire within the caps. Ask me: you approve each hire.')}
+      <label class="field-label">Learning</label>${seg('learning', s.learning, [['active', 'Active'], ['passive', 'Passive'], ['off', 'Off']])}
+      ${help('Active also studies the web in idle time, which costs money while you are away. Passive learns from reviews and retrospectives only.')}
+    </section>
+    <section class="set-sec"><h3 class="set-h">Skills libraries</h3>${skillsBlock(s)}</section>
+    <p class="help foot">Your API key is kept in server memory only, never on disk. You can also set <code>ANTHROPIC_API_KEY</code> before starting. Cost figures are estimates from list prices; set <code>PRICE_IN</code> and <code>PRICE_OUT</code> if your rates differ.</p>`, 'settings');
   $('#s-save').onclick = () => { const key = $('#s-key').value.trim(); if (!key && !s.hasKey) return; send({ type: 'setKey', key: key || undefined, useLive: true }); if (!key) send({ type: 'setMode', mode: 'live' }); };
   const pick = $('#s-model-pick'); const custom = $('#s-model-custom');
   if (pick) pick.onchange = () => { if (pick.value === '__custom') { custom.hidden = false; $('#s-model').focus(); } else send({ type: 'setModel', model: pick.value }); };
@@ -583,7 +607,7 @@ function modelPicker(s) {
   const group = (title, list) => (list.length ? `<optgroup label="${esc(title)}">${list.map((x) => `<option value="${esc(x.id)}" ${x.id === s.model ? 'selected' : ''}>${esc(label(x))}</option>`).join('')}</optgroup>` : '');
   const listed = models.some((x) => x.id === s.model); const cur = models.find((x) => x.id === s.model);
   const live = models.some((x) => x.available);
-  return `<label class="field-label">Model <span class="muted">· ${live ? 'models available to your API key' : 'built-in list'}</span></label>
+  return `<label class="field-label" for="s-model-pick">Model <span class="opt">${live ? 'models your API key can use' : 'built-in list'}</span></label>
     <div class="row"><select class="field" style="flex:1" id="s-model-pick">${group('Recommended', models.filter((x) => x.tier === 'recommended'))}${group('Older', models.filter((x) => x.tier === 'older'))}${group('Also on your key', models.filter((x) => x.tier === 'other'))}<option value="__custom" ${listed ? '' : 'selected'}>Custom model ID…</option></select>${s.hasKey ? '<button class="btn sm" id="s-model-refresh">Refresh list</button>' : ''}</div>
     <div class="row" id="s-model-custom" style="margin-top:6px" ${listed ? 'hidden' : ''}><input class="field" style="flex:1" id="s-model" value="${esc(s.model)}" placeholder="e.g. claude-opus-5-5" /><button class="btn" id="s-model-save">Use this model</button></div>
     <div class="muted" style="font-size:11.5px;margin-top:4px">${cur?.note ? `${esc(cur.note)} ` : ''}Cost estimates use ${s.price.source === 'env' ? 'your PRICE_IN / PRICE_OUT rates' : s.price.source === 'catalog' ? 'this model\'s list price' : 'a $3 / $15 placeholder (unknown model; set PRICE_IN / PRICE_OUT)'}: ${money(s.price.in)} / ${money(s.price.out)} per million tokens.${s.mode !== 'mock' ? ' Switching runs a connection test.' : ''}</div>
@@ -593,13 +617,13 @@ function modelPicker(s) {
 function modeNotice(s) {
   if (s.mode === 'cli') return `<div class="notice"><b>Claude account.</b> The agents run through your signed-in Claude CLI${s.cli?.version ? ` (${esc(s.cli.version)})` : ''}: your account's web search and the connectors you switch on below. No API key is used. Spend is capped at $${s.budgetCap} (estimated).</div>`;
   if (s.mode === 'live') return `<div class="notice"><b>API key.</b> Real Claude (${esc(s.model)}) is running the agents with your key. Agents can search the web and read pages, but cannot use your Claude account's connectors in this mode. Spend is capped at $${s.budgetCap}.</div>`;
-  return `<div class="notice warn"><b>Simulated.</b> The office runs on a built-in simulator so you can see everything work without a key. Deliverables are stamped SIMULATED. Use an API key or your Claude account to make the agents really think.</div>`;
+  return `<div class="notice warn"><b>Simulated.</b> The office runs on a built-in simulator so you can see everything work without a key. Every deliverable is marked as simulated. Use an API key or your Claude account to make the agents really think.</div>`;
 }
 function connectorsBlock(s) {
   const c = s.cli; if (!c) return '';
   if (!c.available) return `<div class="notice" style="margin-top:10px"><b>Claude account.</b> ${c.checked ? esc(c.error || 'The Claude CLI is not available.') : 'Checking for the Claude CLI…'} Install Claude Code, sign in with your account, then reopen Settings.</div>`;
   const rows = c.servers.map((v) => `<div class="conn"><div><b>${esc(v.name)}</b><small>${v.readOnlyTools.length} read-only tool${v.readOnlyTools.length === 1 ? '' : 's'} usable${v.blockedTools ? ` · ${v.blockedTools} blocked (can write or act)` : ''}</small></div>${v.readOnlyTools.length ? `<button class="btn sm ${v.enabled ? 'primary' : ''}" data-conn="${esc(v.name)}" data-on="${v.enabled ? 0 : 1}">${v.enabled ? 'On' : 'Off'}</button>` : '<span class="muted" style="font-size:11px">cannot enable</span>'}</div>`).join('');
-  return `<label class="field-label">Connectors on your Claude account <span class="muted">· off until you switch them on</span></label>
+  return `<label class="field-label">Connectors on your Claude account <span class="opt">off until you switch them on</span></label>
     <div class="muted" style="font-size:11.5px;margin-bottom:4px">When on, agents may <b>read</b> from a connector (for example your notes or documents) to find what they need before asking you. Tools that send, create, change, delete or spend are always blocked. Connector content is treated as untrusted data.</div>
     ${rows || '<div class="notice">No connectors found yet. Scan to look.</div>'}
     <div class="row" style="margin-top:8px"><button class="btn sm" id="cli-scan">Scan connectors</button><span class="muted" style="font-size:11px">${c.scannedAt ? `Last scanned ${esc(new Date(c.scannedAt).toLocaleString())}` : 'Not scanned yet'}${c.plugins?.length ? ` · plugins: ${esc(c.plugins.join(', '))}` : ''}</span></div>`;
@@ -611,15 +635,16 @@ function skillsBlock(s) {
   const name = { marketing: 'Marketing skills', hr: 'HR skills' };
   const one = (k) => {
     const pend = k.pending;
-    return `<div class="notice" style="margin-top:6px"><b>${esc(name[k.id] || k.id)}</b> · ${esc(k.repo)} (${esc(k.branch)}). Commit <code>${esc(k.commit || 'unknown')}</code>${k.vendoredCommit && k.commit !== k.vendoredCommit ? ` (shipped with <code>${esc(k.vendoredCommit)}</code>)` : ''} · ${k.skillCount} skills · synced ${esc(when(k.syncedAt))} · checked ${esc(when(k.checkedAt))}.
-      ${k.lastError ? `<div style="color:#ffb4a0;margin-top:4px">Last check failed: ${esc(k.lastError)}</div>` : ''}</div>
-    ${pend ? `<div class="notice warn"><b>${esc(name[k.id] || k.id)} update available</b> (<code>${esc(pend.commit)}</code>): ${pend.added.length} new${pend.added.length ? ` (${esc(pend.added.slice(0, 6).join(', '))})` : ''}, ${pend.changed.length} changed${pend.changed.length ? ` (${esc(pend.changed.slice(0, 6).join(', '))})` : ''}. <div class="row" style="margin-top:6px"><button class="btn primary sm" data-sk-approve="${esc(k.id)}">Approve</button><button class="btn sm" data-sk-decline="${esc(k.id)}">Decline</button></div></div>` : ''}
-    <div class="row" style="margin-top:4px"><button class="btn sm" data-sk-check="${esc(k.id)}">Check ${esc(k.id)} now</button><button class="btn sm" data-sk-rollback="${esc(k.id)}" ${k.canRollback ? '' : 'disabled'}>Roll back ${esc(k.id)}</button></div>`;
+    return `<div class="lib"><div class="lib-head"><b>${esc(name[k.id] || k.id)}</b><span class="muted">${k.skillCount} skills</span></div>
+      <div class="lib-meta">${esc(k.repo)} (${esc(k.branch)}), commit <code>${esc(k.commit || 'unknown')}</code>${k.vendoredCommit && k.commit !== k.vendoredCommit ? `, shipped with <code>${esc(k.vendoredCommit)}</code>` : ''}. Last synced ${esc(when(k.syncedAt))}, last checked ${esc(when(k.checkedAt))}.</div>
+      ${k.lastError ? `<div class="lib-err">Last check failed: ${esc(k.lastError)}</div>` : ''}
+      ${pend ? `<div class="notice warn"><b>Update available</b> (<code>${esc(pend.commit)}</code>): ${pend.added.length} new${pend.added.length ? ` (${esc(pend.added.slice(0, 6).join(', '))})` : ''}, ${pend.changed.length} changed. <div class="row" style="margin-top:8px"><button class="btn primary sm" data-sk-approve="${esc(k.id)}">Apply update</button><button class="btn sm" data-sk-decline="${esc(k.id)}">Skip it</button></div></div>` : ''}
+      <div class="row lib-actions"><button class="btn sm" data-sk-check="${esc(k.id)}">Check for updates</button><button class="btn sm" data-sk-rollback="${esc(k.id)}" ${k.canRollback ? '' : 'disabled'}>Roll back</button></div></div>`;
   };
   const mode = libs[0].mode;
-  return `<label class="field-label">Skills libraries <span class="muted">· specialists are built from them</span></label>
-    <div class="row">${['auto', 'ask', 'off'].map((m) => `<button class="btn ${mode === m ? 'primary' : ''}" data-skmode="${m}">${m}</button>`).join('')}</div>
-    <div class="muted" style="font-size:11.5px;margin:4px 0">Each library is checked before every hire and every few hours. Updates are stored apart from the project files and can be rolled back. Skill text becomes part of agent prompts, so use <b>ask</b> to approve each update.</div>
+  return `<label class="field-label">Updates from GitHub</label>
+    <div class="seg wide" role="radiogroup">${[['auto', 'Automatic'], ['ask', 'Ask me'], ['off', 'Off']].map(([v, l]) => `<button role="radio" aria-checked="${mode === v}" class="${mode === v ? 'on' : ''}" data-skmode="${v}">${l}</button>`).join('')}</div>
+    <p class="help">Each library is checked before every hire and every few hours. Skill text becomes part of agent prompts, so choose <b>Ask me</b> to approve each update. Updates are stored apart from the project and can be rolled back.</p>
     ${libs.map(one).join('')}`;
 }
 
@@ -640,7 +665,7 @@ $('#task-title').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (
 $('#p-coffee').onclick = () => send({ type: 'coffee' });
 $('#p-town').onclick = () => send({ type: 'townhall' });
 $('#p-announce').onclick = () => {
-  openModal(`<button class="btn close">✕</button><h2>Speak, God</h2><div class="muted">Everyone free will gather and listen.</div>
+  openModal(`<button class="btn close" aria-label="Close">${icon('close')}</button><h2>Speak, God</h2><div class="muted">Everyone free will gather and listen.</div>
     <form id="ann-form"><label class="field-label">Your message</label><input class="field" id="ann-text" maxlength="280" placeholder="Today we ship something the world has never seen." autofocus /><div class="row" style="margin-top:14px"><button class="btn primary">Announce</button></div></form>`, 'announce');
   $('#ann-form').onsubmit = (e) => { e.preventDefault(); const v = $('#ann-text').value.trim(); if (v) { send({ type: 'announce', text: v }); closeModal(); } };
   setTimeout(() => $('#ann-text')?.focus(), 30);

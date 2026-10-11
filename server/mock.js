@@ -1,5 +1,5 @@
 // The simulator: stands in for Claude when no API key is configured.
-// It is deliberately honest — every deliverable is stamped SIMULATED, and the
+// It is deliberately honest — every deliverable is marked as simulated, and the
 // structure it produces comes from the real skill files, not from thin air.
 
 import { siteFindings } from './tools.js';
@@ -316,7 +316,7 @@ export function mockComplete(kind, ctx) {
     }
     case 'synth': {
       const parts = (ctx.outputs || []).map((o) => `- **${o.agentName}** (${o.skill}): ${o.headline}`).join('\n');
-      const text = `# Executive summary: ${topicOf(ctx)}\n\n> SIMULATED OUTPUT. Add an Anthropic API key and switch to Live for real analysis.\n\n## The call\nRun this as one coordinated push. Research first, offer second, copy and channels third, measurement alongside all of it.\n\n${(ctx.decisions || []).length ? `## Decisions made along the way\n${ctx.decisions.map((d) => `- ${d.decision}`).join('\n')}\n\n` : ''}## What the team produced\n${parts}\n\n${(ctx.intake?.openQuestions || []).length ? `## Open questions for God\n${ctx.intake.openQuestions.map((q) => `- ${q}`).join('\n')}\n\n` : ''}## Decisions for God\n1. Approve the offer and positioning direction.\n2. Choose the single north-star metric (our pick: qualified conversions per week).\n3. Release budget for the first two-week test.\n\n## Next 7 days\n- Day 1-2: lock research and offer.\n- Day 3-4: copy and creative to draft.\n- Day 5: measurement live, QA.\n- Day 6-7: soft launch to 10% of traffic and review.\n\n## How we'll know it worked\nA 20% lift in qualified conversions against the 4-week baseline, with CAC at or below target.`;
+      const text = `# Executive summary: ${topicOf(ctx)}\n\n> Simulated output. Connect your Claude account or an API key in Settings for real analysis.\n\n## The call\nRun this as one coordinated push. Research first, offer second, copy and channels third, measurement alongside all of it.\n\n${(ctx.decisions || []).length ? `## Decisions made along the way\n${ctx.decisions.map((d) => `- ${d.decision}`).join('\n')}\n\n` : ''}## What the team produced\n${parts}\n\n${(ctx.intake?.openQuestions || []).length ? `## Open questions for God\n${ctx.intake.openQuestions.map((q) => `- ${q}`).join('\n')}\n\n` : ''}## Decisions for God\n1. Approve the offer and positioning direction.\n2. Choose the single north-star metric (our pick: qualified conversions per week).\n3. Release budget for the first two-week test.\n\n## Next 7 days\n- Day 1-2: lock research and offer.\n- Day 3-4: copy and creative to draft.\n- Day 5: measurement live, QA.\n- Day 6-7: soft launch to 10% of traffic and review.\n\n## How we'll know it worked\nA 20% lift in qualified conversions against the 4-week baseline, with CAC at or below target.`;
       return { text, latencyMs: 3500 };
     }
     case 'work':
@@ -339,7 +339,7 @@ export function mockComplete(kind, ctx) {
       if (act.alt) recLines.push(`${recLines.length + 1}. Alternative considered: run the smaller version first and expand only if the day-14 check passes.`);
       const text = `# ${skill?.title || 'Deliverable'}: ${topic}
 
-> SIMULATED OUTPUT (${agent.name}, ${agent.role}). Structure follows the \`${skill?.name}\` skill. Switch to Live mode for real, brief-specific work.
+> Simulated output (${agent.name}, ${agent.role}). Structure follows the \`${skill?.name}\` skill. Connect your Claude account or an API key in Settings for real, brief-specific work.
 
 **Task:** ${instruction}
 

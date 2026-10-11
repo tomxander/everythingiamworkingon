@@ -254,11 +254,13 @@ Run the agents through your signed-in `claude` command-line tool instead of an A
 
 A light, frosted-glass control room built to match a calm, high-contrast design language: deep blue `#1B405B`, navy `#163144`, mint `#DFF3EB` and white, set in Urbanist.
 
-- **The office.** Agents walk between workstations, the council table, the lounge and the People & Talent room as they work, consult and review. Click anyone to see their skills, memory, lessons, job description and reviews, or to talk to them.
-- **The panels.** Tasks (brief, meetings, decisions, hires), Inbox (what agents need from you), Comms (every message, filterable), Team (org chart, People & Talent), Brain (what the company has learned), Output (deliverables and workforce reports), Metrics and Log.
-- **The console.** Assign to the CMO or to one person, start from a template, announce to the office, call a coffee round or a town hall.
+- **The office.** Agents walk between workstations, the council table, the lounge and the People & Talent room as they work, consult and review. Click anyone to see their skills, memory, lessons, job description and reviews, or to talk to them. Scroll to zoom and drag to pan (pinch and drag on touch screens); `F` fits the office back to the screen.
+- **The panels.** Tasks (brief, meetings, decisions, hires, and Stop or Delete), Inbox (what agents need from you), Comms (every message, filtered by kind and task), Team (org chart, People & Talent), Brain (what the company has learned), Output (deliverables and workforce reports), Stats and Log. Only the Inbox shows a count, because only the Inbox is waiting on you; Tasks and Output show a small dot when something new arrives.
+- **The console.** Give the team a task with an optional brief, hand it to the CMO or to one person, or start from a template. The three icons on the right announce to the office, call a coffee round and call a town hall; hover any icon for what it does.
+- **Settings.** Three sections: *How the agents run* (simulated, API key or Claude account, the model, the connection test and connectors), *How the team behaves* (collaboration, hiring and learning) and *Skills libraries* (check for updates, apply, skip or roll back).
+- **Detail.** One icon set drawn on a single grid, sentence-case labels, plain-language status lines, and empty states that say what to do next.
 - **Motion.** Panels and cards ease in, the tab selector slides, progress bars animate, metric tiles count up, and all of it respects the system reduced-motion setting.
-- **Theming.** Every colour and the glass effect are variables at the top of `public/styles.css`. There is no build step and no image assets.
+- **Theming.** Every colour and the glass effect are variables at the top of `public/styles.css`. There is no build step and no image assets; icons are inline SVG in `public/js/icons.js`.
 
 </details>
 

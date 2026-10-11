@@ -170,7 +170,7 @@ wss.on('connection', (ws) => {
         case 'setSkillsMode': for (const s of skillSyncs) s.mode = ['auto', 'ask', 'off'].includes(m.value) ? m.value : s.mode; broadcast({ type: 'settings', settings: settings() }); break;
         case 'setBudget': company.budgetCap = Math.max(0.1, Number(m.value) || 5); broadcast({ type: 'settings', settings: settings() }); break;
         case 'deliverable': { const d = company.deliverables.get(m.id); if (d) send(ws, { type: 'deliverable_full', deliverable: d }); break; }
-        case 'skill': { const s = skills[m.name]; if (s) send(ws, { type: 'skill_full', skill: { name: s.name, title: s.title, description: s.description, body: s.body, references: s.references } }); break; }
+        case 'skill': { const s = skills[m.name]; if (s) send(ws, { type: 'skill_full', skill: { name: s.name, title: s.title, description: s.description, body: s.body, references: s.references, source: s.source || 'marketing' } }); break; }
         default: break;
       }
     } catch (e) {
