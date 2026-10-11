@@ -1,0 +1,27 @@
+{
+  "name": "4evr-hq",
+  "version": "1.0.0",
+  "description": "4EVR — the world's best marketing company, run by a pixel-art office full of AI agents. You are God.",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tomxander/everythingiamworkingon.git"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/tomxander/everythingiamworkingon/issues"
+  },
+  "homepage": "https://github.com/tomxander/everythingiamworkingon#readme",
+  "dependencies": {
+    "ws": "^8.22.0"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
+}
