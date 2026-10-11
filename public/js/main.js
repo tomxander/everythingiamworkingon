@@ -290,7 +290,7 @@ function intakeHtml(t) {
     <div class="kv"><span>Objective</span><b>${esc(i.objective)}</b><span>Metric</span><b>${esc(i.metric)}</b><span>Target</span><b>${esc(i.target)}</b><span>Timeframe</span><b>${esc(i.timeframe)}</b><span>Budget</span><b>${esc(i.budget)}</b></div>
     ${srcHtml}
     ${i.assumptions?.length ? `<div class="ih">Assumptions</div><ul class="finds">${i.assumptions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
-    ${i.openQuestions?.length ? `<div class="ih q">Open questions for you</div><ul class="finds">${i.openQuestions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul><div class="muted" style="font-size:11px">Answer these in a new task brief to sharpen the next run.</div>` : ''}</div>`;
+    ${i.openQuestions?.length ? `<div class="ih q">Open questions for you</div><ul class="finds">${i.openQuestions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul><div class="muted" style="font-size:11px">They are waiting in the Inbox. Answer them there and the team picks the answers up.</div>` : ''}</div>`;
 }
 
 // ------------------------------------------------------------ comms panel

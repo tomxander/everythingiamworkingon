@@ -194,6 +194,13 @@ setInterval(() => { if (wss.clients.size && company.kb.version !== kbSent) { kbS
 function shutdown() { company.save(); process.exit(0); }
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
 
+function listenError(e) {
+  if (e.code !== 'EADDRINUSE') throw e;
+  console.error(`\n  Port ${PORT} is already in use. 4EVR HQ may already be running: open http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
+  console.error(`  Or start it on another port, for example: PORT=${PORT + 1} npm start\n`);
+  process.exit(1);
+}
+server.on('error', listenError); wss.on('error', listenError);
 server.listen(PORT, HOST, () => {
   console.log(`\n  4EVR HQ is open  →  http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
   console.log(`  mode: ${llm.mode === 'live' ? `API KEY (${llm.model})` : llm.mode === 'cli' ? `CLAUDE ACCOUNT (${llm.model})` : 'SIMULATED (set ANTHROPIC_API_KEY, or choose Claude account in Settings)'}  ·  skills loaded: ${Object.keys(skills).length}  ·  agents: ${sim.agents.size}\n`);

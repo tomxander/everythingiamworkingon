@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/banner.svg" alt="4EVR HQ: a frosted-glass control room for a team of AI marketing agents" width="100%">
+<img src="docs/hero.webp" alt="4EVR HQ mid-task: the pixel office with agents at work and talking, the task card with its progress, and the Inbox holding six requests" width="100%">
 
 <br>
 
@@ -13,7 +13,7 @@
 ![Dependencies](https://img.shields.io/badge/dependencies-1-163144?style=flat-square&labelColor=1B405B)
 ![Modes](https://img.shields.io/badge/modes-simulated%20%C2%B7%20API%20%C2%B7%20Claude%20account-163144?style=flat-square&labelColor=1B405B)
 
-[Quick start](#quick-start) &nbsp;·&nbsp; [How work flows](#how-work-flows) &nbsp;·&nbsp; [The team](#the-team) &nbsp;·&nbsp; [Finding things out](#finding-things-out) &nbsp;·&nbsp; [Learning](#learning) &nbsp;·&nbsp; [Claude account mode](#claude-account-mode) &nbsp;·&nbsp; [Reference](#reference)
+[Install and run](#install-and-run) &nbsp;·&nbsp; [How work flows](#how-work-flows) &nbsp;·&nbsp; [The team](#the-team) &nbsp;·&nbsp; [Finding things out](#finding-things-out) &nbsp;·&nbsp; [Learning](#learning) &nbsp;·&nbsp; [Claude account mode](#claude-account-mode) &nbsp;·&nbsp; [Reference](#reference)
 
 </div>
 
@@ -32,18 +32,78 @@ Their expertise comes from two open-source skill libraries, kept current from th
 
 </div>
 
-<img src="docs/divider.svg" alt="" width="100%">
+## Install and run
 
-## Quick start
+You need a computer running macOS, Windows or Linux, and about five minutes. No account or key is needed to try it: it starts in simulated mode.
 
-Requires Node.js 20 or newer.
+**1. Install Node.js.** Download the LTS version from [nodejs.org](https://nodejs.org) and install it. Version 20 or newer is required. To check, open a terminal (Terminal on macOS, PowerShell on Windows) and run:
+
+```bash
+node -v
+```
+
+It should print `v20` or higher. If it says the command is not found, close the terminal, open a new one and try again.
+
+**2. Get the code.** Either clone it with Git:
+
+```bash
+git clone https://github.com/tomxander/everythingiamworkingon.git
+cd everythingiamworkingon
+```
+
+or press **Code → Download ZIP** on GitHub, unzip it, and open a terminal in that folder. On Windows, open the folder in File Explorer, type `powershell` in the address bar and press Enter. On macOS, type `cd ` (with a space) in Terminal, drag the folder onto the window and press Return.
+
+**3. Install and start it.**
 
 ```bash
 npm install
 npm start
 ```
 
-Open **http://127.0.0.1:4747**, type an instruction into the God console at the bottom, and press Assign.
+`npm install` is only needed the first time and after updates. When the terminal prints `4EVR HQ is open → http://127.0.0.1:4747`, it is running. Keep that terminal open.
+
+**4. Open it.** Go to **http://127.0.0.1:4747** in your browser. Type a task into the God console at the bottom, such as *Get acme.com more qualified leads: 40 enquiries a month*, and press **Assign**. Watch the office, and check the **Inbox** tab for what the team needs from you.
+
+**5. Stop it.** Press `Ctrl + C` in the terminal. Your tasks, deliverables and what the team learned are saved in `data/` and `deliverables/`, and come back the next time you run `npm start`.
+
+### Make the agents really think
+
+Simulated mode shows everything working, but the writing comes from templates. For real work, connect Claude in one of two ways. Both are set up from **Settings** (the sliders icon, top right), which has a **Test connection** button.
+
+- **With your Claude account.** Install [Claude Code](https://claude.com/claude-code), run `claude` once in a terminal and sign in, then quit it. In 4EVR, open Settings, choose **Claude account** and press **Test connection**.
+- **With an API key.** Create a key at [console.anthropic.com](https://console.anthropic.com), then paste it into Settings. Or set it when you start:
+
+  | Where | Command |
+  |---|---|
+  | macOS or Linux | `ANTHROPIC_API_KEY=sk-ant-... npm start` |
+  | Windows PowerShell | `$env:ANTHROPIC_API_KEY="sk-ant-..."; npm start` |
+  | Windows Command Prompt | `set ANTHROPIC_API_KEY=sk-ant-... && npm start` |
+
+  API use is billed by Anthropic. The budget cap (default $5, changed in Settings or with `BUDGET_CAP_USD`) switches back to simulation when estimated spend reaches it.
+
+### Updating
+
+```bash
+git pull
+npm install
+```
+
+If you downloaded the ZIP, download it again and copy your old `data/` and `deliverables/` folders into the new one.
+
+### If something goes wrong
+
+| What you see | What to do |
+|---|---|
+| `node` or `npm` is not recognised | Node.js is not installed, or the terminal was open before you installed it. Install it, then open a new terminal. |
+| `Port 4747 is already in use` | It is probably already running in another terminal: open http://127.0.0.1:4747. Or start on another port with `PORT=4800 npm start` (PowerShell: `$env:PORT=4800; npm start`). |
+| The page will not load | Check the terminal is still running and shows the "is open" line, then refresh the page. |
+| **Claude account** is greyed out or the test fails | Run `claude --version` in a terminal. If it is missing, install Claude Code. If it works, run `claude` and sign in again. |
+| The mode drops back to **Simulated** | Either the budget cap was reached (raise it in Settings) or the key or sign-in stopped working (**Test connection** in Settings says what failed). |
+| A task shows a warning | The card says what failed, such as a website that could not be read. **Retry** runs the task again from scratch. |
+
+To run the test suite: `npm test`.
+
+### Three ways to run
 
 There are three ways to run the agents. You can switch between them in Settings at any time, and pick the model from a list there: Claude Opus 5.5 (the default), Sonnet 5.5, Haiku 5.5, Fable 5.1 and older models, each shown with its price. With an API key the list comes from your account, so it only shows models your key can use. Cost estimates and the budget cap follow the selected model's list price.
 
@@ -56,11 +116,9 @@ There are three ways to run the agents. You can switch between them in Settings 
 
 > The API-key path is tested against a local fake of the Messages API, and Claude account mode against a fake `claude` binary plus real calls to the CLI. Neither is exercised against production services by the test suite. If a live call fails, the reason is shown on the task card, and Settings has a **Test connection** button that checks the key or sign-in, the model and (in Claude account mode) the tool bridge.
 
-<img src="docs/divider.svg" alt="" width="100%">
-
 ## How work flows
 
-<img src="docs/flow.svg" alt="The workflow: intake, research, brief, plan and hire, kickoff, execute, review, align, synthesise, retro" width="100%">
+<img src="docs/flow.webp" alt="Ten steps in four phases. Understand: intake, research, brief. Organise: plan and hire, kickoff. Do the work: execute, review, align. Wrap up: synthesise, retro. At any step, what the team cannot find goes to your Inbox." width="100%">
 
 | Step | What happens |
 |---|---|
@@ -80,8 +138,6 @@ State, deliverables, client profiles, hires and knowledge are saved to `data/` a
 **Stopping and deleting.** Open a task and press **Stop** to halt it: model calls in flight are aborted (API requests are cancelled, `claude` processes are killed), nothing new starts, agents go back to their desks, and its open Inbox requests are withdrawn. Finished deliverables are kept and **Retry** runs it again from scratch. **Delete** removes a task with its deliverables (including the Markdown files), requests and messages; a running task is stopped first. What the team learned from it stays in the knowledge base.
 
 **Writing a good request.** Include the site, the goal and a number: *"Get acsiatech.com more qualified leads: 40 enquiries a month within 90 days. Budget $5k. Buyers are OEM procurement leads. Competitors: …"* The brief field is the place for the baseline, budget, ideal customer and what has already been tried.
-
-<img src="docs/divider.svg" alt="" width="100%">
 
 ## The team
 
@@ -151,8 +207,6 @@ Team leads report to the CMO. Nia reports to you. Everyone else reports to their
 
 **Cost control.** `COLLAB` sets how much the team talks, since each turn is a small model call. `full`: every owner speaks, owners consult upstream authors, there is a retro. `lean`: only leads speak at kickoff, handoffs are templated, alignment goes straight to the decision, no retro. `off`: agents just work. Reviews and lesson recording happen in every mode.
 
-<img src="docs/divider.svg" alt="" width="100%">
-
 ## Finding things out
 
 Agents look for things themselves first, then ask. The order is **the client's site, the wider internet, your connected tools, and only then you.**
@@ -165,6 +219,8 @@ Agents look for things themselves first, then ask. The order is **the client's s
 
 ### The Inbox
 
+<img src="docs/inbox.webp" alt="The Inbox tab with two data requests from Dee and Rafa, each saying why it matters and what was already tried, with a box to answer, attach files or say you can't provide it" width="300" align="right">
+
 When something that matters is still missing after that, the agent calls `request_info`: a **question**, a **document**, a **data export** or **access**, with why it matters and what it already tried. The request appears in the Inbox tab.
 
 - **You answer** by typing, pasting, or attaching text files (CSV, Markdown, JSON and the like), or you say you cannot provide it.
@@ -172,8 +228,6 @@ When something that matters is still missing after that, the agent calls `reques
 - **No lazy asking.** A request that does not say what was searched is refused, duplicates are merged, and requests are capped at three per agent and eight per task. Vera's intake questions and gaps the outside research could not fill are tracked the same way.
 - **Pulled, not pushed.** In [Claude account mode](#claude-account-mode), with a connector on, each new request is first looked up in your connected tools. If it is found, the request is answered automatically and marked with its source, and you can overrule it.
 - **In simulated mode**, each playbook raises the data it would really want (an analytics export for analytics, a Search Console export for the SEO audit), unless the brief already supplies it.
-
-<img src="docs/divider.svg" alt="" width="100%">
 
 ## Hiring and People & Talent
 
@@ -205,8 +259,6 @@ Both libraries are vendored in `vendor/` and checked against GitHub before every
 
 Skill text becomes part of agent prompts, so an upstream compromise would be a prompt-injection route. Only `api.github.com` and `codeload.github.com` are contacted. Archives are size-capped and read by a hardened parser that accepts only `skills/<name>/SKILL.md` and reference files (`references/`, `content/`, `examples/`, `prompts/`); everything else is ignored. Each skill is validated. **If that risk matters to you, use `ask`.**
 
-<img src="docs/divider.svg" alt="" width="100%">
-
 ## Learning
 
 Agents improve with use. The knowledge base lives in `data/knowledge.json` and can be inspected, pinned and deleted in the Brain tab.
@@ -223,8 +275,6 @@ Agents improve with use. The knowledge base lives in `data/knowledge.json` and c
 
 The approval comparison uses real reviews but the sample starts small. In simulated mode the effect is rule-based, so it shows the loop working without being evidence that a model improves.
 
-<img src="docs/divider.svg" alt="" width="100%">
-
 ## Claude account mode
 
 Run the agents through your signed-in `claude` command-line tool instead of an API key. It brings the account's own web search and any connectors (MCP servers) it has.
@@ -234,16 +284,12 @@ Run the agents through your signed-in `claude` command-line tool instead of an A
 - **What it cannot do.** It cannot read your claude.ai Projects or chat history, because there is no supported way for a local program to. Put what an agent needs in a connected tool, or paste or attach it in the Inbox.
 - **Cost and speed.** Calls are slower than the API (a process per call) and run a few at a time (`CLI_CONCURRENCY`, default 3). They count against your account's usage limits.
 
-<img src="docs/divider.svg" alt="" width="100%">
-
 ## Honest limits
 
 - **Evidence or it did not happen.** Claims about a client must cite a page the team read. Anything else is labelled **Not verified**. If a site cannot be read (blocked, offline, or rendered entirely client-side), the task continues with a warning, and the team is told nothing about the site is verified.
 - **No access to your accounts.** The team cannot log in to ad platforms, analytics, a CRM or the client's CMS, and cannot change a live site. Deliverables are recommendations and ready-to-use assets, with the person who should apply them named.
 - **Invisible from outside.** Traffic, conversion rate, lead quality and the sales process cannot be seen from outside a company. Provide them in the brief, or answer the Inbox.
 - **Simulated mode is a demonstration.** It exercises the whole workflow but does not reason about your client. Use it to see how the platform behaves, not to produce client work.
-
-<img src="docs/divider.svg" alt="" width="100%">
 
 ## Reference
 
@@ -349,7 +395,7 @@ server/
   skills.js       Skill loading (several libraries) and brief-to-skill matching
   sim.js, life.js, map.js   Agent state and movement, idle behaviour, floor plan and pathfinding
 public/           Browser client: canvas renderer and glass interface (no build step)
-docs/             The banner and diagrams used in this README
+docs/             The images in this README, made from the running app
 vendor/           marketingskills and hr-skills (MIT)
 tests/            node:test suites
 ```
@@ -396,8 +442,6 @@ npm test
 137 tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (private-address and redirect protection, untrusted-content fencing), searching beyond the client's site, site crawling, the org chart, kickoff, handoffs, alignment, escalation, outside-expert consults, hiring policy and approval, People & Talent (requisitions, the rating rule, reports, releases needing approval), upstream skill sync (hardened archive reading against the real repositories, validation, overlay, rollback, approval), the knowledge base and learning loop, stopping and deleting tasks (including aborting calls in flight), the requests tracker, Claude account mode against a fake `claude` binary (sign-in, tool bridge, read-only connector rules, lookups), and the API-key path against scripted fakes of the Messages API: tool use, hiring mid-task, lessons, reflection, prompt-injection resistance, truncation recovery, revisions and timeouts, planning that falls back visibly instead of hanging, signed thinking blocks in tool loops, and full tasks against a strict fake of the API that enforces the real request rules.
 
 </details>
-
-<img src="docs/divider.svg" alt="" width="100%">
 
 <div align="center">
 
