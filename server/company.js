@@ -121,7 +121,9 @@ export class Company extends EventEmitter {
 
   retryTask(id) {
     const t = this.tasks.get(id); if (!t) throw new Error('No such task.');
-    t.status = 'queued'; t.subtasks = []; t.plan = null; t.error = null; this.pushTask(t);
+    // start clean: nothing from the failed run (warnings, meetings, decisions, discussion, consult counts) should leak into the retry
+    Object.assign(t, { status: 'queued', subtasks: [], plan: null, error: null, warnings: [], meetings: [], decisions: [], thread: [], expertConsults: 0, summaryId: null, intake: null, retried: (t.retried || 0) + 1 });
+    this.pushTask(t);
     this.queue.push(t); this.pump();
   }
 

@@ -102,3 +102,14 @@ test('the connection test covers sign-in, the tool bridge, and an out-of-date CL
   reset(); assert.match(l.cli.explain("error: unknown option '--system-prompt-file'", 1), /does not support an option[\s\S]*npm install -g/);
   assert.match(l.cli.explain('model: claude-x not found', 1), /not available to this account/);
 });
+
+test('learning runs in Claude account mode too, not only with an API key', async () => {
+  reset(); const w = world({ learning: 'active' }); const l = await ready(); w.company.llm = l;
+  process.env.FAKE_RESULT = 'Next time, cite the page for every claim about the client.';
+  const t = { id: 'T5', title: 'x', brief: '', subtasks: [], thread: [] }; w.company.tasks.set('T5', t);
+  const sub = { id: 'T5.1', skill: 'seo-audit', agent: 'rafa' }; const a = w.company.agent('rafa');
+  const learned = await w.company.reflect(t, sub, a, { verdict: 'revise', improvement: 'Cite sources.', by: 'vera' });
+  assert.ok(Array.isArray(learned), 'reflection ran');
+  assert.equal(w.company.canStudy(), true); l.totals.cost = 100; assert.equal(w.company.canStudy(), false, 'the half-budget limit applies in this mode');
+  reset();
+});

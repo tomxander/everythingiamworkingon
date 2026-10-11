@@ -132,7 +132,8 @@ export class SkillSync extends EventEmitter {
   async get(url, opts) {
     if (!this.allowedUrl(url)) throw new Error('Refusing to contact a host that is not GitHub.');
     const res = await rawGet(url, 4, opts);
-    if (res.status === 403 || res.status === 429) throw new Error('GitHub is rate-limiting requests right now. Try again later.');
+    if (res.status === 429 || (res.status === 403 && /rate limit/i.test(String(res.body).slice(0, 2000)))) throw new Error('GitHub is rate-limiting requests right now. Try again later.');
+    if (res.status === 403) { let msg = ''; try { msg = JSON.parse(res.body).message || ''; } catch { /* not JSON */ } throw new Error(`GitHub refused the request (HTTP 403)${msg ? `: ${String(msg).slice(0, 160)}` : ''}.`); }
     if (res.status === 404) throw new Error(`Not found on GitHub: ${new URL(url).pathname}`);
     if (res.status >= 400) throw new Error(`GitHub returned HTTP ${res.status}`);
     return res;

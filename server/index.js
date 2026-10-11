@@ -188,7 +188,7 @@ process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
 
 server.listen(PORT, HOST, () => {
   console.log(`\n  4EVR HQ is open  →  http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
-  console.log(`  mode: ${llm.mode === 'live' ? `LIVE (${llm.model})` : 'SIMULATED (set ANTHROPIC_API_KEY for real Claude agents)'}  ·  skills loaded: ${Object.keys(skills).length}  ·  agents: ${sim.agents.size}\n`);
+  console.log(`  mode: ${llm.mode === 'live' ? `API KEY (${llm.model})` : llm.mode === 'cli' ? `CLAUDE ACCOUNT (${llm.model})` : 'SIMULATED (set ANTHROPIC_API_KEY, or choose Claude account in Settings)'}  ·  skills loaded: ${Object.keys(skills).length}  ·  agents: ${sim.agents.size}\n`);
 });
 
 export { company, sim, llm, server };

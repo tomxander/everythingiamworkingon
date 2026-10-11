@@ -32,7 +32,7 @@ export const learning = {
     const learned = [];
     if (review.improvement) { const l = this.kb.add({ ...base, scope: 'agent', source: ok ? 'review' : 'revision', tags: [sub.skill, 'review'], text: `In ${sub.skill}: ${String(review.improvement).replace(/[.]+$/, '')}.` }); if (l) learned.push(l.id); }
     if (ok && review.strength && !review.improvement) { const l = this.kb.add({ ...base, scope: 'agent', source: 'review', tags: [sub.skill, 'strength'], text: `Keep doing this in ${sub.skill}: ${String(review.strength).replace(/[.]+$/, '')}.` }); if (l) learned.push(l.id); }
-    if (this.kb.mode === 'active' && this.llm.mode === 'live') learned.push(...(await this.reflect(task, sub, author, review)));
+    if (this.kb.mode === 'active' && this.llm.mode !== 'mock') learned.push(...(await this.reflect(task, sub, author, review)));
     if (learned.length) { (task.learned ||= []).push(...learned); sub.learned = learned; this.pushTask(task); }
     this.maybeConsolidate().catch(() => {});
   },
@@ -103,7 +103,7 @@ export const learning = {
     if (facts.openQuestions >= 3) derived.lessons.push({ scope: 'company', text: 'Thin briefs leave several open questions. Ask God for the baseline, target and budget in the first line of the request.', tags: ['brief'] });
 
     let notes = derived;
-    if (this.llm.mode === 'live') {
+    if (this.llm.mode !== 'mock') {
       try {
         const res = await this.withAgent(vera, async () => this.llm.complete({
           kind: 'retro', maxTokens: 900, ...this.toolkit(vera, task, { light: true }),
@@ -166,7 +166,7 @@ export const learning = {
     try {
       for (const { skill, lessons } of this.kb.consolidationCandidates()) {
         let text;
-        if (this.llm.mode === 'live') {
+        if (this.llm.mode !== 'mock') {
           try {
             const vera = this.agent('vera');
             const res = await this.llm.complete({ kind: 'consolidate', maxTokens: 500, ...this.toolkit(vera, null, { light: true }), system: this.personaSystem(vera, 'You maintain the company playbooks.'), user: `Merge these lessons about ${skill} into at most 8 crisp, non-overlapping instructions, one per line, no numbering, no links, nothing that only applies to one client:\n${lessons.map((l) => `- ${l.text}`).join('\n')}`, ctx: { lessons: lessons.map((l) => l.text) } });
@@ -185,7 +185,7 @@ export const learning = {
     if (this.kb.mode !== 'active') return false;
     const day = this.sim.day; if (this._studyDay !== day) { this._studyDay = day; this._studyToday = 0; }
     if (this._studyToday >= Math.max(1, Math.round(STUDY_PER_DAY * this.kb.studyFactor()))) return false; // studies more when it pays off, less when it does not
-    if (this.llm.mode === 'live' && this.llm.totals.cost >= this.budgetCap * 0.5) return false; // learning never eats the client budget
+    if (this.llm.mode !== 'mock' && this.llm.totals.cost >= this.budgetCap * 0.5) return false; // learning never eats the client budget
     return true;
   },
 
@@ -204,7 +204,7 @@ export const learning = {
       this.kb.addNote({ agent: a.id, skill: skillName, title: page.title || src.title, url: page.url, headings: page.headings.filter((h) => h.level <= 3).slice(0, 6).map((h) => h.text) });
       this.addLog(`${a.name} studied ${skillName}: ${clip(page.title || src.title, 70)}`, { type: 'agent', agent: a.id });
       this.sim.say(a, `Reading up on ${skillName}`, 3);
-      if (this.llm.mode === 'live') {
+      if (this.llm.mode !== 'mock') {
         const known = this.kb.relevant({ agent: a.id, dept: a.dept, skill: skillName, limit: 6 }).map((l) => `- ${l.text}`).join('\n') || '- (none)';
         const res = await this.llm.complete({
           kind: 'study', maxTokens: 400,

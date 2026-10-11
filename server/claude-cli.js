@@ -13,6 +13,12 @@ import os from 'node:os';
 import path from 'node:path';
 
 const BIN = () => process.env.CLAUDE_BIN || 'claude';
+/** On Windows the CLI is a .cmd shim, which Node will only start through a shell; quote every argument for it. */
+function spawnCli(args, opts) {
+  if (process.platform !== 'win32') return spawn(BIN(), args, opts);
+  const q = (a) => (/^[\w@%+=:,./\\-]+$/.test(String(a)) ? String(a) : `"${String(a).replace(/"/g, '""')}"`);
+  return spawn([BIN(), ...args].map(q).join(' '), { ...opts, shell: true, windowsHide: true });
+}
 const TIMEOUT_MS = Number(process.env.API_TIMEOUT_MS || 180000);
 
 // ---------------------------------------------------------------- which connector tools may be used
@@ -77,7 +83,7 @@ export class ClaudeCli {
   available() {
     return new Promise((resolve) => {
       let out = '', done = false; const finish = (r) => { if (!done) { done = true; resolve(r); } };
-      let p; try { p = spawn(BIN(), ['--version'], { stdio: ['ignore', 'pipe', 'pipe'], env: this.childEnv() }); } catch (e) { return finish({ ok: false, error: e.message }); }
+      let p; try { p = spawnCli(['--version'], { stdio: ['ignore', 'pipe', 'pipe'], env: this.childEnv() }); } catch (e) { return finish({ ok: false, error: e.message }); }
       p.stdout.on('data', (d) => (out += d)); p.on('error', (e) => finish({ ok: false, error: e.code === 'ENOENT' ? 'The `claude` command was not found. Install Claude Code and sign in with your account.' : e.message }));
       p.on('close', (c) => { this.version = out.trim() || null; finish(c === 0 && out.trim() ? { ok: true, version: out.trim() } : { ok: false, error: 'The `claude` command did not run.' }); });
       setTimeout(() => { try { p.kill(); } catch { /* gone */ } finish({ ok: false, error: 'The `claude` command timed out.' }); }, 15000);
@@ -118,7 +124,7 @@ export class ClaudeCli {
   spawnRun(args, input, cwd, timeoutMs) {
     return new Promise((resolve, reject) => {
       let out = '', err = '', timedOut = false; let p;
-      try { p = spawn(BIN(), args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: this.childEnv() }); } catch (e) { return reject(e); }
+      try { p = spawnCli(args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: this.childEnv() }); } catch (e) { return reject(e); }
       const timer = setTimeout(() => { timedOut = true; try { p.kill('SIGKILL'); } catch { /* gone */ } }, timeoutMs);
       p.stdout.on('data', (d) => (out += d)); p.stderr.on('data', (d) => (err += d));
       p.on('error', (e) => { clearTimeout(timer); reject(new Error(e.code === 'ENOENT' ? 'The `claude` command was not found. Install Claude Code and sign in with your account.' : e.message)); });
@@ -137,7 +143,7 @@ export class ClaudeCli {
       const init = await new Promise((resolve, reject) => {
         let buf = '', done = false; let p;
         const finish = (v, e) => { if (done) return; done = true; clearTimeout(timer); try { p.kill('SIGKILL'); } catch { /* gone */ } e ? reject(e) : resolve(v); };
-        try { p = spawn(BIN(), ['-p', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--permission-mode', 'dontAsk', '--max-turns', '1'], { cwd: dir, stdio: ['pipe', 'pipe', 'pipe'], env: this.childEnv() }); } catch (e) { return reject(e); }
+        try { p = spawnCli(['-p', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--permission-mode', 'dontAsk', '--max-turns', '1'], { cwd: dir, stdio: ['pipe', 'pipe', 'pipe'], env: this.childEnv() }); } catch (e) { return reject(e); }
         const timer = setTimeout(() => finish(null, new Error('The Claude CLI did not report its tools in time.')), timeoutMs);
         p.stdout.on('data', (d) => { buf += d; for (const line of buf.split('\n')) { if (!line.trim()) continue; try { const j = JSON.parse(line); if (j.type === 'system' && j.subtype === 'init') return finish(j); } catch { /* partial line */ } } });
         p.on('error', (e) => finish(null, e)); p.on('close', () => finish(null, new Error('The Claude CLI exited before reporting its tools.')));

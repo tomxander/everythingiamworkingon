@@ -9,6 +9,8 @@ const API_URL = process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
 const PRICE_IN = Number(process.env.PRICE_IN ?? 3);
 const PRICE_OUT = Number(process.env.PRICE_OUT ?? 15);
 const TIMEOUT_MS = Number(process.env.API_TIMEOUT_MS || 180000);
+const MIN_TOKENS = Number(process.env.MIN_MAX_TOKENS || 1500);
+const API_CONCURRENCY = Number(process.env.API_CONCURRENCY || 4); // several agents work at once; low-tier keys hit per-minute limits fast
 
 export class LLM {
   constructor() {
@@ -132,8 +134,10 @@ export class LLM {
     let inTotal = 0, outTotal = 0, toolCalls = 0, text = '', continued = false;
     for (let turn = 0; turn < maxTurns + 3; turn++) {
       const useTools = tools && onTool && toolCalls < maxTurns * 2 && turn < maxTurns;
-      const body = { model: this.model, max_tokens: maxTokens, system: blocks, messages };
-      if (useTools) body.tools = tools;
+      // Thinking (on by default for current models) counts against max_tokens, so short replies get a floor.
+      const body = { model: this.model, max_tokens: Math.max(maxTokens || 0, MIN_TOKENS), system: blocks, messages };
+      // Once a conversation holds tool calls, every request must still define the tools. To stop further calls, say so with tool_choice.
+      if (tools && onTool) { body.tools = tools; if (!useTools) body.tool_choice = { type: 'none' }; }
       const json = await this.apiCall(body, timeoutMs);
       const u = json.usage || {};
       const input = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0);
@@ -168,6 +172,10 @@ export class LLM {
         messages.push({ role: 'user', content: 'You were cut off. Continue exactly where you stopped, without repeating anything and without a preamble.' });
         continue;
       }
+      if (!text.trim()) {
+        const why = json.stop_reason === 'refusal' ? 'The model declined to answer this request.' : `The model returned no text (stop reason: ${json.stop_reason || 'unknown'}).`;
+        this.lastError = why; throw new Error(why);
+      }
       this.lastError = null;
       return { text: text.trim(), latencyMs: Date.now() - started, usage: { input: inTotal, output: outTotal }, simulated: false, toolCalls, truncated: json.stop_reason === 'max_tokens' };
     }
@@ -176,6 +184,13 @@ export class LLM {
   }
 
   async apiCall(body, timeoutMs = null) {
+    this.apiActive ||= 0; this.apiQueue ||= [];
+    if (this.apiActive >= API_CONCURRENCY) await new Promise((r) => this.apiQueue.push(r));
+    this.apiActive++;
+    try { return await this.apiCallOnce(body, timeoutMs); } finally { this.apiActive--; this.apiQueue.shift()?.(); }
+  }
+
+  async apiCallOnce(body, timeoutMs = null) {
     let lastErr; const limit = timeoutMs || TIMEOUT_MS; const attempts = timeoutMs ? 2 : 4; // a call with its own deadline gets fewer retries
     for (let attempt = 0; attempt < attempts; attempt++) {
       const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), limit);
@@ -191,8 +206,9 @@ export class LLM {
           await new Promise((r) => setTimeout(r, Math.min(wait, 20000)));
           continue;
         }
-        const json = await res.json();
-        if (!res.ok) { const err = new Error(json?.error?.message || `API ${res.status}`); err.fatal = true; throw err; }
+        const raw = await res.text(); let json = null; try { json = JSON.parse(raw); } catch { /* not JSON: a proxy or gateway page */ }
+        if (!res.ok) { const err = new Error(json?.error?.message ? `${json.error.message}` : `API ${res.status}: ${raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160) || 'no details'}`); err.fatal = true; throw err; }
+        if (!json) throw new Error(`The API returned something that is not JSON: ${raw.slice(0, 120)}`);
         return json;
       } catch (e) {
         lastErr = e.name === 'AbortError' ? new Error(`The API did not answer within ${Math.round(limit / 100) / 10}s`) : e;
