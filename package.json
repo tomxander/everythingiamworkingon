@@ -1,7 +1,7 @@
 {
   "name": "4evr-hq",
   "version": "1.0.0",
-  "description": "4EVR — the world's best marketing company, run by a pixel-art office full of AI agents. You are God.",
+  "description": "A marketing agency run by AI agents, with a live control room. Specialist agents plan, research, review, hire and learn; you steer from one place.",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
@@ -23,5 +23,14 @@
   "type": "module",
   "engines": {
     "node": ">=20"
-  }
+  },
+  "keywords": [
+    "ai-agents",
+    "multi-agent",
+    "marketing",
+    "claude",
+    "mcp",
+    "agent-orchestration",
+    "marketing-automation"
+  ]
 }
