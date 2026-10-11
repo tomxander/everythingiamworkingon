@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>4EVR HQ</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230a0d1a'/%3E%3Cpath d='M3 3h3v6h2V3h3v10H8v-2H6v2H3z' fill='%23ffd96a'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand">
+      <div class="logo" aria-label="4EVR">4EVR</div>
+      <div class="tag">HQ <span id="tagline"></span></div>
+    </div>
+    <div class="top-center">
+      <div class="chip clock" title="Office time. A day lasts 12 real minutes at 1x."><span id="clock-icon">☀</span><span id="clock">Day 1 · 08:30</span></div>
+      <button class="chip mode" id="mode-chip" title="Click to open settings"><span class="dot"></span><span id="mode-label">SIMULATED</span></button>
+      <div class="chip" title="Tokens used this session (estimated in simulated mode)"><b id="tok">0</b> tok</div>
+      <div class="chip" title="Estimated spend vs. budget cap"><b id="cost">$0.00</b><span class="muted"> / <span id="cap">$5</span></span></div>
+    </div>
+    <div class="top-right">
+      <div class="seg" id="speed">
+        <button data-act="pause" title="Pause (Space)">❚❚</button>
+        <button data-speed="1" class="on">1×</button>
+        <button data-speed="2">2×</button>
+        <button data-speed="4">4×</button>
+      </div>
+      <button class="icon-btn" id="btn-fit" title="Fit office to screen (F)">⤢</button>
+      <button class="icon-btn" id="btn-settings" title="Settings">⚙</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section id="stage">
+      <canvas id="world" aria-label="4EVR office"></canvas>
+      <div id="godvoice" class="godvoice" hidden></div>
+      <div id="toasts"></div>
+      <div id="stage-hint">Scroll to zoom · drag to pan · click a person</div>
+      <div id="loading"><div class="logo big">4EVR</div><div class="muted">opening the office…</div></div>
+    </section>
+
+    <aside id="side">
+      <nav id="tabs" role="tablist">
+        <button data-tab="tasks" class="on">Tasks<i id="n-tasks"></i></button>
+        <button data-tab="comms">Comms</button>
+        <button data-tab="team">Team</button>
+        <button data-tab="output">Output<i id="n-output"></i></button>
+        <button data-tab="metrics">Metrics</button>
+        <button data-tab="log">Log</button>
+      </nav>
+      <div id="panels">
+        <div class="panel on" id="p-tasks"></div>
+        <div class="panel" id="p-comms"></div>
+        <div class="panel" id="p-team"></div>
+        <div class="panel" id="p-output"></div>
+        <div class="panel" id="p-metrics"></div>
+        <div class="panel" id="p-log"></div>
+      </div>
+    </aside>
+  </main>
+
+  <footer id="console">
+    <div class="console-label"><span class="halo">☼</span> GOD CONSOLE</div>
+    <form id="task-form" autocomplete="off">
+      <input id="task-title" type="text" maxlength="140" placeholder="Command the company…  e.g. Launch our new app and get 1,000 signups in 30 days" />
+      <textarea id="task-brief" rows="1" maxlength="4000" placeholder="Brief (optional): product, audience, budget, constraints, links…"></textarea>
+      <select id="task-assignee" title="Who should do this?"><option value="">Vera plans it</option></select>
+      <select id="task-tpl" title="Quick templates"><option value="">Templates…</option></select>
+      <button class="primary" type="submit">Assign ↵</button>
+    </form>
+    <div class="powers">
+      <button id="p-announce" title="Speak to the whole office">📣 Announce</button>
+      <button id="p-coffee" title="Everyone free takes a coffee break">☕ Coffee round</button>
+      <button id="p-town" title="Summon everyone to the Town Hall">🏛 Town Hall</button>
+    </div>
+  </footer>
+</div>
+
+<div id="modal" class="modal" hidden><div class="modal-card" id="modal-card"></div></div>
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>

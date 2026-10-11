@@ -215,8 +215,12 @@ export function buildMap() {
     f('couch', ix + 31, iy + 4, 4, 1, { dirOut: 'up' });
     f('coffeetable', ix + 32, iy + 2, 2, 1);
     deco('rug', ix + 30, iy + 1, 6, 5, { color: 'warm' });
+    // approach tile + final position on the cushion
     spots.couch = [
-      { tx: ix + 31, ty: iy + 2 }, { tx: ix + 33, ty: iy + 2 }, { tx: ix + 32, ty: iy + 3 }, { tx: ix + 34, ty: iy + 3 },
+      { tx: ix + 31, ty: iy + 2, x: ix + 31.5, y: iy + 1.45, dir: 'down' },
+      { tx: ix + 34, ty: iy + 2, x: ix + 34.5, y: iy + 1.45, dir: 'down' },
+      { tx: ix + 31, ty: iy + 3, x: ix + 31.5, y: iy + 4.45, dir: 'up' },
+      { tx: ix + 34, ty: iy + 3, x: ix + 34.5, y: iy + 4.45, dir: 'up' },
     ];
     f('beanbag', ix + 39, iy + 1, 1, 1, { color: '#e05d7a' }); f('beanbag', ix + 41, iy + 2, 1, 1, { color: '#4ea3e0' }); f('beanbag', ix + 40, iy + 4, 1, 1, { color: '#e0c24e' });
     spots.beanbag = [{ tx: ix + 39, ty: iy + 2 }, { tx: ix + 41, ty: iy + 3 }, { tx: ix + 40, ty: iy + 5 }];

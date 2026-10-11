@@ -75,6 +75,9 @@ test('end to end (simulated): a task is planned, worked, reviewed, summarised', 
   assert.ok(events.includes('comms') && events.includes('deliverable') && events.includes('task'));
   assert.ok(w.company.comms.some((c) => c.kind === 'review'), 'peer review happened');
   assert.ok(w.llm.totals.calls > 5);
+  // regression: unresolved template values must never leak into chat or deliverables
+  for (const c of w.company.comms) assert.ok(!/undefined|\[object/.test(c.text), `bad comms text: ${c.text}`);
+  for (const d of w.company.deliverables.values()) assert.ok(!/undefined|\[object/.test(d.markdown), `bad deliverable ${d.id}`);
   // nobody is left stuck busy once the finale is over
   await run(w.sim, () => [...w.sim.agents.values()].every((a) => !a.busy), 120);
   assert.ok([...w.sim.agents.values()].every((a) => !a.busy));

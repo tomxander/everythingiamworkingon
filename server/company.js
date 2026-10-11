@@ -223,7 +223,7 @@ export class Company extends EventEmitter {
       this.addLog(`${a.name} started ${sub.skill} on ${task.id}`, { type: 'agent', agent: a.id, taskId: task.id });
       this.addComms({ from: a.id, to: 'all', text: `Starting ${sub.skill} for "${clip(task.title, 60)}".`, kind: 'task', taskId: task.id });
 
-      if (sub.consult) await this.consult(a, this.agent(sub.consult), task, sub, tok);
+      if (sub.consult) { try { await this.consult(a, this.agent(sub.consult), task, sub, tok); } catch (e) { this.addLog(`Consult skipped (${e.message})`, { type: 'system', agent: a.id }); a.pose = 'stand'; } }
 
       await sim.goTo(a, a.desk.seat, { pose: 'sit', tok }); a.pose = 'type';
       sim.emoteFor(a, 'dots', 3);
@@ -273,7 +273,7 @@ export class Company extends EventEmitter {
     const at = sim.nearestWalkable({ tx: Math.floor(b.x) + 1, ty: Math.floor(b.y) });
     const ok = await sim.goTo(a, { ...at, dir: 'left' }, { tok });
     if (!ok) return;
-    const ctxQ = { title: task.title, to: { name: b.name, quirks: b.quirks }, from: a };
+    const ctxQ = { title: task.title, to: { name: b.name, short: b.short, quirks: b.quirks }, from: a };
     const q = await this.llm.complete({ kind: 'consult_q', system: `You are ${a.name}, ${a.role}. ${a.persona} Ask ${b.name} (${b.role}) one short, specific question to sharpen your ${sub.skill} work. One or two sentences, no preamble.`, user: `Task: ${task.title}\n${task.brief}\nYour assignment: ${sub.instruction}`, maxTokens: 120, ctx: ctxQ });
     this.account(task, q); if (this.llm.mode === 'mock') await this.sleepSim(1.2, tok);
     a.pose = 'talk'; sim.say(a, q.text, 5.5); this.emit('comms', { from: a.id, to: b.id, text: q.text, kind: 'consult', taskId: task.id });
@@ -317,9 +317,17 @@ export class Company extends EventEmitter {
       this.sim.say(vera, 'Pulling it together…', 4);
       const system = [`${COMPANY.charter}\n\nYou are Vera Quill, CMO of 4EVR. ${vera.persona}`, skillPrompt(this.skills['marketing-plan'], 6000)];
       const user = `Synthesize the team's work into an executive summary for God on: ${task.title}\n\nBrief:\n${task.brief || '(title only)'}\n\nTeam output:\n${outputs.map((o) => `## ${o.agentName} (${o.skill})\n${clip(o.text, 2200)}`).join('\n\n')}\n\nWrite: The call (3 sentences), What each specialist contributed (one line each), Risks and open decisions, Next 7 days, How we'll know it worked. Under 500 words.`;
-      const res = await this.llm.complete({ kind: 'synth', system, user, maxTokens: 1800, ctx: { title: task.title, outputs } });
-      if (res.simulated) await this.sleepSim(res.latencyMs / 1000, tok);
-      this.account(task, res);
+      let res;
+      try {
+        res = await this.llm.complete({ kind: 'synth', system, user, maxTokens: 1800, ctx: { title: task.title, outputs } });
+        if (res.simulated) await this.sleepSim(res.latencyMs / 1000, tok);
+        this.account(task, res);
+      } catch (e) {
+        // never lose finished work because the summary call failed
+        this.addLog(`Summary call failed (${e.message}); compiled a plain summary instead`, { type: 'system', agent: 'vera' });
+        const text = `# Executive summary: ${task.title}\n\n> The summary model call failed (${e.message}). Below is a plain compilation of the team's headlines.\n\n${outputs.map((o) => `- **${o.agentName}** (${o.skill}): ${o.headline}`).join('\n')}`;
+        res = { text, usage: { input: 0, output: 0 }, simulated: false };
+      }
       return res;
     });
     const sub = { id: `${task.id}.S`, agent: 'vera', skill: 'marketing-plan', instruction: 'Executive summary' };

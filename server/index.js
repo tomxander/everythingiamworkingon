@@ -51,7 +51,7 @@ const server = http.createServer((req, res) => {
   if (p === '/api/health') return json(res, 200, { ok: true, mode: llm.mode, restored });
   // static
   let file = path.normalize(path.join(PUBLIC, p === '/' ? 'index.html' : p));
-  if (!file.startsWith(PUBLIC)) { res.writeHead(403); return res.end(); }
+  if (file !== PUBLIC && !file.startsWith(PUBLIC + path.sep)) { res.writeHead(403); return res.end(); }
   fs.readFile(file, (err, buf) => {
     if (err) { res.writeHead(404); return res.end('Not found'); }
     res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' });
@@ -110,7 +110,7 @@ wss.on('connection', (ws) => {
         case 'chat': { company.godChat(m.agent, m.text).catch((e) => send(ws, { type: 'toast', text: `Chat failed: ${e.message}`, level: 'warn' })); break; }
         case 'pause': sim.paused = !!m.paused; break;
         case 'speed': sim.speed = Math.min(8, Math.max(0.25, Number(m.speed) || 1)); break;
-        case 'setKey': { llm.setKey(m.key); if (m.useLive && llm.apiKey) llm.setMode('live'); broadcast({ type: 'settings', settings: settings() }); break; }
+        case 'setKey': { if (typeof m.key === 'string' && m.key.trim()) llm.setKey(m.key); if (m.useLive && llm.apiKey) llm.setMode('live'); broadcast({ type: 'settings', settings: settings() }); break; }
         case 'setMode': llm.setMode(m.mode); broadcast({ type: 'settings', settings: settings() }); break;
         case 'setModel': llm.setModel(String(m.model || '').slice(0, 80)); broadcast({ type: 'settings', settings: settings() }); break;
         case 'setBudget': company.budgetCap = Math.max(0.1, Number(m.value) || 5); broadcast({ type: 'settings', settings: settings() }); break;
