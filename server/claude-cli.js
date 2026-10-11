@@ -11,6 +11,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { Cancelled } from './cancel.js';
 
 const BIN = () => process.env.CLAUDE_BIN || 'claude';
 /** On Windows the CLI is a .cmd shim, which Node will only start through a shell; quote every argument for it. */
@@ -94,7 +95,8 @@ export class ClaudeCli {
    * One non-interactive call. `allowed`: tool names the call may use. `mcp`: { url } of our bridge, if any.
    * `builtin`: which built-in tools exist at all ('' for none, 'WebSearch').
    */
-  async run({ system, user, model, allowed = [], mcp = null, builtin = '', maxTurns = 4, timeoutMs = TIMEOUT_MS }) {
+  async run({ system, user, model, allowed = [], mcp = null, builtin = '', maxTurns = 4, timeoutMs = TIMEOUT_MS, signal = null }) {
+    if (signal?.aborted) throw new Cancelled();
     this.lastModel = model; await this.slot(); const dir = fs.mkdtempSync(path.join(os.tmpdir(), '4evr-cli-'));
     try {
       fs.writeFileSync(path.join(dir, 'system.txt'), system || 'You are a helpful assistant.');
@@ -102,7 +104,8 @@ export class ClaudeCli {
       if (model) args.push('--model', model);
       if (mcp) { fs.writeFileSync(path.join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { '4evr': { type: 'http', url: mcp.url } } })); args.push('--mcp-config', path.join(dir, 'mcp.json')); }
       if (allowed.length) args.push('--allowedTools', ...allowed);
-      const { stdout, stderr, code, timedOut } = await this.spawnRun(args, user, dir, timeoutMs);
+      const { stdout, stderr, code, timedOut, cancelled } = await this.spawnRun(args, user, dir, timeoutMs, signal);
+      if (cancelled) throw new Cancelled();
       if (timedOut) throw new Error(`The Claude CLI did not answer within ${Math.round(timeoutMs / 1000)}s.`);
       let j; try { j = JSON.parse(stdout); } catch { j = null; }
       if (!j) throw new Error(this.explain(stderr || stdout, code));
@@ -121,14 +124,15 @@ export class ClaudeCli {
     return `The Claude CLI failed (exit ${code}): ${t || 'no output'}`;
   }
 
-  spawnRun(args, input, cwd, timeoutMs) {
+  spawnRun(args, input, cwd, timeoutMs, signal = null) {
     return new Promise((resolve, reject) => {
-      let out = '', err = '', timedOut = false; let p;
+      let out = '', err = '', timedOut = false, cancelled = false; let p;
       try { p = spawnCli(args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: this.childEnv() }); } catch (e) { return reject(e); }
       const timer = setTimeout(() => { timedOut = true; try { p.kill('SIGKILL'); } catch { /* gone */ } }, timeoutMs);
+      const onAbort = () => { cancelled = true; try { p.kill('SIGKILL'); } catch { /* gone */ } }; signal?.addEventListener('abort', onAbort, { once: true });
       p.stdout.on('data', (d) => (out += d)); p.stderr.on('data', (d) => (err += d));
       p.on('error', (e) => { clearTimeout(timer); reject(new Error(e.code === 'ENOENT' ? 'The `claude` command was not found. Install Claude Code and sign in with your account.' : e.message)); });
-      p.on('close', (code) => { clearTimeout(timer); resolve({ stdout: out, stderr: err, code, timedOut }); });
+      p.on('close', (code) => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); resolve({ stdout: out, stderr: err, code, timedOut, cancelled }); });
       p.stdin.on('error', () => {}); p.stdin.end(input || '');
     });
   }

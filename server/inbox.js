@@ -139,6 +139,12 @@ export const inbox = {
     return { applied: todo.length, updated: n };
   },
 
+  /** A stopped task no longer needs answers: its open requests leave the "needs you" list. */
+  withdrawRequests(taskId) {
+    let n = 0; for (const r of this.inboxState().values()) if (r.taskId === taskId && r.status === 'open') { r.status = 'withdrawn'; n++; this.emit('broadcast', { type: 'request', request: r }); }
+    return n;
+  },
+
   requestsPublic() { return [...this.inboxState().values()].sort((a, b) => b.created - a.created).slice(0, 200); },
   inboxSave() { return [...this.inboxState().values()]; },
   inboxLoad(list) { for (const r of list || []) this.inboxState().set(r.id, r); },

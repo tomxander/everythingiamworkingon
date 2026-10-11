@@ -210,7 +210,7 @@ export const hiring = {
       const skill = named ? bestSkill(this.skills, agent.skills, `${input.assignment} ${input.role}`) : agent.skills[0]; // a described need maps to its best-matching playbook
       const sub = this.addDynamicSubtask(task, agent.id, skill, input.assignment, a.id);
       return `Hired ${agent.name} (${agent.role}). Their workstream ${sub.id} is queued: "${clip(String(input.assignment || ''), 140)}". Their output goes into the final summary. Do not wait for it: state what you expect from them and carry on with your own deliverable.`;
-    } catch (e) { return `Could not hire: ${e.message}`; }
+    } catch (e) { if (e.cancelled) throw e; return `Could not hire: ${e.message}`; }
   },
 
   /** Planning-time hires. Live: the CMO's plan lists them. Simulated: rules read the brief and the site. */
@@ -245,6 +245,7 @@ export const hiring = {
           this.insertLeadingStep(plan, agent.id, this.skills[skill] ? skill : agent.skills[0], instruction);
         }
       } catch (e) {
+        if (e.cancelled) throw e;
         this.addLog(`Could not hire a ${spec.role}: ${e.message}`, { type: 'system', taskId: task.id }); this.talk(task, { from: 'vera', to: 'all', kind: 'hire', text: `I looked at hiring a ${spec.role} but: ${e.message}` });
       }
     }

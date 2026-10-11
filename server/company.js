@@ -14,6 +14,7 @@ import { hiring } from './hiring.js';
 import { learning } from './learning.js';
 import { hr } from './hr.js';
 import { inbox } from './inbox.js';
+import { taskScope, Cancelled } from './cancel.js';
 
 const MAX_ACTIVE_TASKS = Number(process.env.MAX_ACTIVE_TASKS || 3);
 const CLIENT_TTL = 6 * 3600 * 1000; // re-read a client's site after 6 hours
@@ -114,15 +115,67 @@ export class Company extends EventEmitter {
   pump() {
     while (this.active < MAX_ACTIVE_TASKS && this.queue.length) {
       const t = this.queue.shift(); this.active++;
-      this.runTask(t).catch((e) => { console.error('task failed', e); t.status = 'failed'; t.error = String(e.message || e); this.pushTask(t); this.addLog(`${t.id} failed: ${t.error}`, { type: 'task', taskId: t.id }); })
-        .finally(() => { this.active--; this.pump(); });
+      const ctrl = new AbortController(); (this.aborts ||= new Map()).set(t.id, ctrl);
+      // everything this task does (and every model call it makes) runs inside its own stop scope
+      taskScope.run({ signal: ctrl.signal, taskId: t.id }, () => this.runTask(t))
+        .catch((e) => {
+          if (e?.cancelled || t.cancelled) return this.finishCancel(t);
+          console.error('task failed', e); t.status = 'failed'; t.error = String(e.message || e); this.pushTask(t); this.addLog(`${t.id} failed: ${t.error}`, { type: 'task', taskId: t.id });
+        })
+        .finally(() => { this.aborts.delete(t.id); this.active--; if (t.pendingDelete) this.removeTask(t); this.pump(); });
     }
+  }
+
+  /** A stopped task never continues: called after each step that can take a while. */
+  checkpoint(task) { if (task.cancelled) throw new Cancelled(); }
+
+  /** Stop a queued or running task. Model calls in flight are aborted; agents put down what they were doing. */
+  cancelTask(id) {
+    const t = this.tasks.get(id); if (!t) throw new Error('No such task.');
+    if (!['queued', 'researching', 'planning', 'active', 'review'].includes(t.status)) throw new Error(`${id} is not running.`);
+    t.cancelled = true;
+    const qi = this.queue.indexOf(t); if (qi >= 0) { this.queue.splice(qi, 1); this.finishCancel(t); return t; }
+    t.status = 'stopping'; this.pushTask(t);
+    this.aborts?.get(t.id)?.abort();
+    this.schedulers.get(t.id)?.(); // let the scheduler notice and stop starting work
+    this.addLog(`God stopped ${t.id}`, { type: 'task', taskId: t.id });
+    return t;
+  }
+
+  finishCancel(t) {
+    t.cancelled = true; t.status = 'cancelled'; t.finished = Date.now();
+    for (const s of t.subtasks) if (!['done', 'failed'].includes(s.status)) s.status = 'cancelled';
+    this.withdrawRequests?.(t.id);
+    for (const a of this.sim.agents.values()) if (a.status?.includes(t.id) || a.status?.includes(clip(t.title, 36))) this.sim.setStatus(a, 'Back to my desk');
+    this.pushTask(t); this.toast(`${t.id} stopped.`, 'info'); this.save();
+  }
+
+  /** Delete a task with its deliverables and requests. A running task is stopped first and removed once it has wound down. */
+  deleteTask(id) {
+    const t = this.tasks.get(id); if (!t) throw new Error('No such task.');
+    if (['queued', 'researching', 'planning', 'active', 'review', 'stopping'].includes(t.status)) {
+      t.pendingDelete = true; if (t.status !== 'stopping') this.cancelTask(id);
+      if (t.status === 'cancelled') this.removeTask(t); // it was only queued
+      return { pending: t.status !== 'cancelled' };
+    }
+    this.removeTask(t); return { pending: false };
+  }
+
+  removeTask(t) {
+    if (!this.tasks.has(t.id)) return;
+    this.tasks.delete(t.id); this.schedulers.delete(t.id);
+    for (const [k, d] of this.deliverables) if (d.taskId === t.id) this.deliverables.delete(k);
+    try { fs.rmSync(path.join(this.deliverablesDir, t.id), { recursive: true, force: true }); } catch { /* already gone */ }
+    for (const [k, r] of this.inboxState()) if (r.taskId === t.id) this.inboxState().delete(k);
+    this.comms = this.comms.filter((m) => m.taskId !== t.id);
+    this.addLog(`God deleted ${t.id}: ${clip(t.title, 80)}`, { type: 'task' });
+    this.emit('broadcast', { type: 'task_deleted', id: t.id }); this.save();
   }
 
   retryTask(id) {
     const t = this.tasks.get(id); if (!t) throw new Error('No such task.');
     // start clean: nothing from the failed run (warnings, meetings, decisions, discussion, consult counts) should leak into the retry
-    Object.assign(t, { status: 'queued', subtasks: [], plan: null, error: null, warnings: [], meetings: [], decisions: [], thread: [], expertConsults: 0, summaryId: null, intake: null, retried: (t.retried || 0) + 1 });
+    Object.assign(t, { status: 'queued', subtasks: [], plan: null, error: null, warnings: [], meetings: [], decisions: [], thread: [], expertConsults: 0, summaryId: null, intake: null, cancelled: false, pendingDelete: false, finished: null, retried: (t.retried || 0) + 1 });
     this.pushTask(t);
     this.queue.push(t); this.pump();
   }
@@ -136,6 +189,7 @@ export class Company extends EventEmitter {
     // 1. Research: if the request names a website, actually read it before anyone plans anything.
     task.urls = extractUrls(`${task.title}\n${task.brief}`);
     if (task.urls.length) await this.recon(task);
+    this.checkpoint(task);
 
     let plan;
     if (task.assignee) {
@@ -161,6 +215,7 @@ export class Company extends EventEmitter {
         return p;
       });
     }
+    this.checkpoint(task);
     task.plan = { summary: plan.summary };
     task.subtasks = plan.steps.map((s, i) => ({
       id: `${task.id}.${i + 1}`, idx: i, agent: s.agent, skill: s.skill, instruction: s.instruction, deps: s.deps, consult: s.consult || null,
@@ -173,12 +228,18 @@ export class Company extends EventEmitter {
     this.addLog(`Vera planned ${task.id} into ${task.subtasks.length} workstreams`, { type: 'task', taskId: task.id, agent: 'vera' });
 
     // 3. Kickoff: the owners are briefed together and say what they need from each other
-    await this.kickoff(task).catch((e) => this.addLog(`Kickoff skipped (${e.message})`, { type: 'system', taskId: task.id }));
+    await this.kickoff(task).catch((e) => { if (!e.cancelled) this.addLog(`Kickoff skipped (${e.message})`, { type: 'system', taskId: task.id }); });
+    this.checkpoint(task);
 
     // run subtasks as their dependencies finish
     await new Promise((resolve) => {
       const started = new Set();
       const advance = () => {
+        if (task.cancelled) { // stop starting work; finish once what is running has unwound
+          for (const s of task.subtasks) if (!started.has(s.id) && !['done', 'failed'].includes(s.status)) { s.status = 'cancelled'; started.add(s.id); }
+          if (task.subtasks.every((s) => ['done', 'failed', 'cancelled'].includes(s.status))) resolve();
+          return;
+        }
         for (const s of task.subtasks) {
           if (started.has(s.id)) continue;
           const failedDep = s.deps.some((d) => task.subtasks[d]?.status === 'failed');
@@ -186,18 +247,20 @@ export class Company extends EventEmitter {
           if (s.deps.every((d) => task.subtasks[d]?.status === 'done')) {
             started.add(s.id); s.status = 'ready';
             this.runSubtask(task, s).catch(async (e) => {
+              if (e?.cancelled || task.cancelled) { s.status = 'cancelled'; return; }
               // a failure goes to the lead first; one retry; otherwise the workstream is cut and the gap is flagged
               const recovered = await this.escalate(task, s, e).catch(() => false);
               if (!recovered) { s.status = 'failed'; s.error = String(e.message || e); this.addLog(`${s.id} failed: ${s.error}`, { type: 'task', taskId: task.id, agent: s.agent }); }
             }).finally(() => { this.pushTask(task); advance(); });
           }
         }
-        if (task.subtasks.every((s) => s.status === 'done' || s.status === 'failed')) resolve();
+        if (task.subtasks.every((s) => ['done', 'failed', 'cancelled'].includes(s.status))) resolve();
       };
       this.schedulers.set(task.id, advance); // lets someone hired mid-task add a workstream
       advance();
     });
     this.schedulers.delete(task.id);
+    this.checkpoint(task);
 
     const doneSubs = task.subtasks.filter((s) => s.status === 'done');
     if (!doneSubs.length) {
@@ -210,8 +273,10 @@ export class Company extends EventEmitter {
     // review & synthesis by Vera
     task.status = 'review'; this.pushTask(task);
     // 4. Alignment: look for real conflicts between the deliverables and decide them before the summary
-    await this.alignment(task, doneSubs).catch((e) => this.addLog(`Alignment skipped (${e.message})`, { type: 'system', taskId: task.id }));
+    await this.alignment(task, doneSubs).catch((e) => { if (!e.cancelled) this.addLog(`Alignment skipped (${e.message})`, { type: 'system', taskId: task.id }); });
+    this.checkpoint(task);
     await this.synthesize(task, doneSubs);
+    this.checkpoint(task);
     task.status = 'done'; task.finished = Date.now(); this.completed++;
     this.pushTask(task);
     this.addLog(`${task.id} complete: ${task.title}`, { type: 'task', taskId: task.id, agent: 'vera' });
@@ -240,6 +305,7 @@ export class Company extends EventEmitter {
       raw = extractJson(res.text);
       if (!res.simulated && !raw) this.warn(task, 'The planner did not return a usable plan, so the workstreams come from the built-in playbook for this kind of request.');
     } catch (e) {
+      if (e.cancelled) throw e;
       this.warn(task, `Planning failed (${e.message}). The workstreams come from the built-in playbook for this kind of request.`);
     }
     const plan = this.normalizePlan(raw) || planFromPlaybooks(task.title, task.brief, 7, task.intake?.playbook);
@@ -275,6 +341,7 @@ export class Company extends EventEmitter {
     const a = this.agent(sub.agent); const sim = this.sim;
     const skill = this.skills[sub.skill];
     await this.withAgent(a, async (tok) => {
+      this.checkpoint(task); // it may have been stopped while this agent was busy elsewhere
       sub.status = 'working'; sub.started = Date.now(); this.pushTask(task);
       sim.setStatus(a, `${sub.skill}: ${clip(task.title, 36)}`);
       this.addLog(`${a.name} started ${sub.skill} on ${task.id}`, { type: 'agent', agent: a.id, taskId: task.id });
@@ -282,7 +349,7 @@ export class Company extends EventEmitter {
 
       // a planned consult, or by default a word with whoever produced the work you are building on
       const consultWith = sub.consult || (this.collab === 'full' && sub.deps.length ? task.subtasks[sub.deps[0]]?.agent : null) || this.pickExpert(a, task, sub)?.id;
-      if (consultWith && consultWith !== a.id) { try { await this.consult(a, this.agent(consultWith), task, sub, tok); } catch (e) { this.addLog(`Consult skipped (${e.message})`, { type: 'system', agent: a.id }); a.pose = 'stand'; } }
+      if (consultWith && consultWith !== a.id) { try { await this.consult(a, this.agent(consultWith), task, sub, tok); } catch (e) { if (e.cancelled) throw e; this.addLog(`Consult skipped (${e.message})`, { type: 'system', agent: a.id }); a.pose = 'stand'; } }
 
       await sim.goTo(a, a.desk.seat, { pose: 'sit', tok }); a.pose = 'type';
       sim.emoteFor(a, 'dots', 3);
@@ -308,6 +375,7 @@ export class Company extends EventEmitter {
       if (res.truncated) this.addLog(`${a.name}'s ${sub.skill} output hit the length limit even after continuing`, { type: 'system', agent: a.id });
       if (this.llm.mode === 'mock' || res.simulated) await this.sleepSim(res.latencyMs / 1000, tok);
       this.account(task, res);
+      this.checkpoint(task); // stopped while working: discard the result instead of filing it
 
       const d = this.saveDeliverable(task, sub, a, res);
       if (res.simulated) this.mockDataNeeds(task, a, sub);
@@ -435,6 +503,7 @@ export class Company extends EventEmitter {
         if (res.simulated) await this.sleepSim(res.latencyMs / 1000, tok);
         this.account(task, res);
       } catch (e) {
+        if (e.cancelled) throw e;
         // never lose finished work because the summary call failed
         this.addLog(`Summary call failed (${e.message}); compiled a plain summary instead`, { type: 'system', agent: 'vera' });
         const text = `# Executive summary: ${task.title}\n\n> The summary model call failed (${e.message}). Below is a plain compilation of the team's headlines.\n\n${outputs.map((o) => `- **${o.agentName}** (${o.skill}): ${o.headline}`).join('\n')}`;
@@ -593,6 +662,7 @@ export class Company extends EventEmitter {
         constraints: arr(j.constraints, []), assumptions: arr(j.assumptions, fallback.assumptions), openQuestions: arr(j.openQuestions, fallback.openQuestions).slice(0, 4), site: fallback.site,
       };
     } catch (e) {
+      if (e.cancelled) throw e;
       this.warn(task, `The intake call failed (${e.message}). The brief below is a generic fallback, not tailored to this request.`);
       return fallback;
     }
@@ -736,7 +806,8 @@ export class Company extends EventEmitter {
       if (d.settings?.hiringMode && !process.env.HIRING) this.hiringMode = d.settings.hiringMode;
       this.kb.load(); this.hrLoad(d.hr); this.inboxLoad(d.inbox);
       for (const t of d.tasks || []) {
-        if (['planning', 'active', 'review', 'queued'].includes(t.status)) { t.status = 'interrupted'; t.error = 'Server restarted while this was running. Use Retry.'; t.subtasks.forEach((s) => { if (s.status === 'working' || s.status === 'ready') s.status = 'waiting'; }); }
+        if (t.status === 'stopping') { t.status = 'cancelled'; }
+        if (['planning', 'active', 'review', 'queued', 'researching'].includes(t.status)) { t.status = 'interrupted'; t.error = 'Server restarted while this was running. Use Retry.'; t.subtasks.forEach((s) => { if (s.status === 'working' || s.status === 'ready') s.status = 'waiting'; }); }
         this.tasks.set(t.id, t);
       }
       for (const x of d.deliverables || []) this.deliverables.set(x.id, x);

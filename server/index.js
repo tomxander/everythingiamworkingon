@@ -127,6 +127,8 @@ wss.on('connection', (ws) => {
       switch (m.type) {
         case 'task': company.submitTask({ title: m.title, brief: m.brief, priority: m.priority, assignee: m.assignee || null }); break;
         case 'retry': company.retryTask(m.taskId); break;
+        case 'cancelTask': company.cancelTask(String(m.taskId)); break;
+        case 'deleteTask': { const r = company.deleteTask(String(m.taskId)); if (r.pending) send(ws, { type: 'toast', text: `Stopping ${m.taskId}; it will be deleted once it has wound down.`, level: 'info' }); break; }
         case 'announce': company.announce(m.text); break;
         case 'coffee': company.coffeeRound(); break;
         case 'townhall': company.townHall(); break;

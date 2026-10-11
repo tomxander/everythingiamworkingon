@@ -9,7 +9,7 @@
 ### A marketing agency run by AI agents, with a control room to match.
 
 ![Node](https://img.shields.io/badge/node-%E2%89%A5%2020-163144?style=flat-square&labelColor=1B405B)
-![Tests](https://img.shields.io/badge/tests-130%20passing-163144?style=flat-square&labelColor=1B405B)
+![Tests](https://img.shields.io/badge/tests-135%20passing-163144?style=flat-square&labelColor=1B405B)
 ![Dependencies](https://img.shields.io/badge/dependencies-1-163144?style=flat-square&labelColor=1B405B)
 ![Modes](https://img.shields.io/badge/modes-simulated%20%C2%B7%20API%20%C2%B7%20Claude%20account-163144?style=flat-square&labelColor=1B405B)
 
@@ -76,6 +76,8 @@ There are three ways to run the agents. You can switch between them in Settings 
 | **10 · Retro** | The CMO leads a retrospective. Lessons, and occasionally company principles, are recorded. |
 
 State, deliverables, client profiles, hires and knowledge are saved to `data/` and `deliverables/` (every deliverable is also plain Markdown). Treat everything as a draft for human review.
+
+**Stopping and deleting.** Open a task and press **Stop** to halt it: model calls in flight are aborted (API requests are cancelled, `claude` processes are killed), nothing new starts, agents go back to their desks, and its open Inbox requests are withdrawn. Finished deliverables are kept and **Retry** runs it again from scratch. **Delete** removes a task with its deliverables (including the Markdown files), requests and messages; a running task is stopped first. What the team learned from it stays in the knowledge base.
 
 **Writing a good request.** Include the site, the goal and a number: *"Get acsiatech.com more qualified leads: 40 enquiries a month within 90 days. Budget $5k. Buyers are OEM procurement leads. Competitors: …"* The brief field is the place for the baseline, budget, ideal customer and what has already been tried.
 
@@ -389,7 +391,7 @@ The server is authoritative. It streams state to the browser over WebSocket at 1
 npm test
 ```
 
-130 tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (private-address and redirect protection, untrusted-content fencing), searching beyond the client's site, site crawling, the org chart, kickoff, handoffs, alignment, escalation, outside-expert consults, hiring policy and approval, People & Talent (requisitions, the rating rule, reports, releases needing approval), upstream skill sync (hardened archive reading against the real repositories, validation, overlay, rollback, approval), the knowledge base and learning loop, the requests tracker, Claude account mode against a fake `claude` binary (sign-in, tool bridge, read-only connector rules, lookups), and the API-key path against scripted fakes of the Messages API: tool use, hiring mid-task, lessons, reflection, prompt-injection resistance, truncation recovery, revisions and timeouts, planning that falls back visibly instead of hanging, signed thinking blocks in tool loops, and full tasks against a strict fake of the API that enforces the real request rules.
+135 tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (private-address and redirect protection, untrusted-content fencing), searching beyond the client's site, site crawling, the org chart, kickoff, handoffs, alignment, escalation, outside-expert consults, hiring policy and approval, People & Talent (requisitions, the rating rule, reports, releases needing approval), upstream skill sync (hardened archive reading against the real repositories, validation, overlay, rollback, approval), the knowledge base and learning loop, stopping and deleting tasks (including aborting calls in flight), the requests tracker, Claude account mode against a fake `claude` binary (sign-in, tool bridge, read-only connector rules, lookups), and the API-key path against scripted fakes of the Messages API: tool use, hiring mid-task, lessons, reflection, prompt-injection resistance, truncation recovery, revisions and timeouts, planning that falls back visibly instead of hanging, signed thinking blocks in tool loops, and full tasks against a strict fake of the API that enforces the real request rules.
 
 </details>
 

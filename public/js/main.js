@@ -30,6 +30,11 @@ function handle(m) {
     case 'comms': st.comms.push(m.msg); if (st.comms.length > 500) st.comms.shift(); appendComms(m.msg); break;
     case 'log': st.log.push(m.entry); if (st.log.length > 500) st.log.shift(); if (st.tab === 'log') renderLog(); break;
     case 'task': st.tasks.set(m.task.id, m.task); renderTasksSoon(); updateBadges(); break;
+    case 'task_deleted': {
+      st.tasks.delete(m.id); for (const [k, d] of st.deliv) if (d.taskId === m.id) st.deliv.delete(k);
+      st.requests = st.requests.filter((r) => r.taskId !== m.id); st.comms = st.comms.filter((c) => c.taskId !== m.id);
+      renderTasksSoon(); updateBadges(); if (st.tab === 'output') renderOutputSoon(); if (st.tab === 'inbox') renderInbox(); if (st.tab === 'comms') renderComms(); break;
+    }
     case 'deliverable': st.deliv.set(m.deliverable.id, m.deliverable); if (st.tab !== 'output') st.unreadOutput++; renderOutputSoon(); updateBadges(); break;
     case 'stats': st.stats = m.stats; st.settings = m.settings; updateTop(); if (st.tab === 'metrics') renderMetrics(); break;
     case 'settings': st.settings = m.settings; updateTop(); refreshSettings(); break;
@@ -165,7 +170,7 @@ $('#mode-chip').onclick = () => openSettings();
 $('#btn-settings').onclick = () => openSettings();
 
 function updateBadges() {
-  const active = [...st.tasks.values()].filter((t) => ['queued', 'planning', 'active', 'review'].includes(t.status)).length;
+  const active = [...st.tasks.values()].filter((t) => ['queued', 'researching', 'planning', 'active', 'review', 'stopping'].includes(t.status)).length;
   $('#n-tasks').textContent = active || '';
   $('#n-output').textContent = st.unreadOutput || '';
   $('#n-inbox').textContent = st.requests.filter((r) => r.status === 'open').length || '';
@@ -236,6 +241,9 @@ function renderTasks() {
   $$('[data-skill]', p).forEach((s) => (s.onclick = (e) => { e.stopPropagation(); send({ type: 'skill', name: s.dataset.skill }); }));
   $$('[data-deliv]', p).forEach((s) => (s.onclick = () => send({ type: 'deliverable', id: s.dataset.deliv })));
   $$('[data-retry]', p).forEach((s) => (s.onclick = () => send({ type: 'retry', taskId: s.dataset.retry })));
+  $$('[data-stop]', p).forEach((b) => (b.onclick = (e) => { e.stopPropagation(); if (confirm(`Stop ${b.dataset.stop}? Work in progress is discarded; finished deliverables are kept.`)) { b.disabled = true; send({ type: 'cancelTask', taskId: b.dataset.stop }); } }));
+  $$('[data-del]', p).forEach((b) => (b.onclick = (e) => { e.stopPropagation(); const t = st.tasks.get(b.dataset.del); const running = t && ['queued', 'researching', 'planning', 'active', 'review'].includes(t.status);
+    if (confirm(`Delete ${b.dataset.del}${running ? ' (it will be stopped first)' : ''}? Its deliverables, requests and messages are removed. What the team learned from it is kept.`)) { b.disabled = true; send({ type: 'deleteTask', taskId: b.dataset.del }); } }));
   $$('[data-agent]', p).forEach((s) => (s.onclick = () => selectAgent(s.dataset.agent, { focus: true })));
 }
 
@@ -244,7 +252,7 @@ function taskDetail(t) {
         <div class="hl">${esc(s.status === 'done' ? (s.headline || s.instruction) : s.instruction)}</div>${s.review ? `<div class="rv">${esc(nm(s.review.by))}: ${esc(s.review.text)}</div>` : ''}${s.status === 'failed' && s.error ? `<div class="rv" style="color:#a1293a;font-style:normal">${esc(s.error)}</div>` : ''}</div>
         <div style="text-align:right"><span class="status ${s.status === 'working' ? 'active' : s.status === 'done' ? 'done' : s.status === 'failed' ? 'failed' : ''}">${s.status}</span>${s.outputId ? `<div><button class="btn sm" data-deliv="${s.outputId}" style="margin-top:4px">Read</button></div>` : ''}</div></div>`).join('');
   return `${t.brief ? `<div class="plan"><b>Brief:</b> ${esc(t.brief)}</div>` : ''}${(t.warnings || []).map((w) => `<div class="notice warn">⚠ ${esc(w)}</div>`).join('')}${intakeHtml(t)}${teamHtml(t)}${t.plan ? `<div class="plan"><b>Plan:</b> ${esc(t.plan.summary)}</div>` : ''}${subs}
-    <div class="row" style="margin-top:10px">${t.summaryId ? `<button class="btn primary" data-deliv="${t.summaryId}">Read executive summary</button>` : ''}${t.profileId ? `<button class="btn" data-deliv="${t.profileId}">Client profile</button>` : ''}${['failed', 'interrupted'].includes(t.status) ? `<button class="btn" data-retry="${t.id}">Retry</button>` : ''}</div>${t.error ? `<div class="notice warn" style="white-space:pre-wrap">${esc(t.error)}</div>` : ''}`;
+    <div class="row" style="margin-top:10px">${t.summaryId ? `<button class="btn primary" data-deliv="${t.summaryId}">Read executive summary</button>` : ''}${t.profileId ? `<button class="btn" data-deliv="${t.profileId}">Client profile</button>` : ''}${['failed', 'interrupted', 'cancelled'].includes(t.status) ? `<button class="btn" data-retry="${t.id}">Retry</button>` : ''}${['queued', 'researching', 'planning', 'active', 'review'].includes(t.status) ? `<button class="btn" data-stop="${t.id}">■ Stop</button>` : ''}${t.status === 'stopping' ? '<span class="muted">Stopping…</span>' : `<button class="btn" data-del="${t.id}" style="margin-left:auto">Delete</button>`}</div>${t.error ? `<div class="notice warn" style="white-space:pre-wrap">${esc(t.error)}</div>` : ''}`;
 }
 
 function teamHtml(t) {
@@ -318,7 +326,7 @@ function renderInbox() {
     const a = st.agents[r.by]; const ans = r.answer;
     const head = `<div class="rq-head">${avatar(r.by)}<b>${esc(a?.short || r.by)}</b>${kind(r.kind)}${r.taskId ? `<span class="pill">${esc(r.taskId)}</span>` : ''}${r.auto ? `<span class="pill auto">found in connected tools</span>` : ''}<span class="muted" style="margin-left:auto;font-size:11px">${esc(r.id)}</span></div>`;
     const body = `<div class="rq-what">${esc(r.what)}</div>${r.why ? `<div class="rq-why">${esc(r.why)}</div>` : ''}${r.tried ? `<div class="rq-tried">Already tried: ${esc(r.tried)}</div>` : ''}`;
-    if (r.status !== 'open') return `<div class="card req ${r.status}">${head}${body}<div class="rq-ans">${r.status === 'declined' ? 'You said you cannot provide this.' : `${esc(ans.by !== 'god' ? `From ${ans.by.replace('connector: ', '')}:\n` : '')}${esc(ans.text.slice(0, 600))}${ans.text.length > 600 ? '…' : ''}`}</div>${ans?.files?.length ? `<div class="rq-files">Attached: ${ans.files.map((f) => esc(f.name)).join(', ')}</div>` : ''}</div>`;
+    if (r.status !== 'open') return `<div class="card req ${r.status}">${head}${body}<div class="rq-ans">${r.status === 'withdrawn' ? 'Withdrawn: the task was stopped.' : r.status === 'declined' ? 'You said you cannot provide this.' : `${esc(ans.by !== 'god' ? `From ${ans.by.replace('connector: ', '')}:\n` : '')}${esc(ans.text.slice(0, 600))}${ans.text.length > 600 ? '…' : ''}`}</div>${ans?.files?.length ? `<div class="rq-files">Attached: ${ans.files.map((f) => esc(f.name)).join(', ')}</div>` : ''}</div>`;
     const files = (st.rqFiles[r.id] || []).map((f) => esc(f.name)).join(', ');
     return `<div class="card req">${head}${body}<textarea data-rq-text="${r.id}" placeholder="Type the answer, or paste the data here…"></textarea><div class="rq-actions"><button class="btn primary sm" data-rq-send="${r.id}">Send answer</button><label class="btn sm" style="cursor:pointer">Attach files<input type="file" multiple hidden data-rq-file="${r.id}" accept=".txt,.md,.csv,.tsv,.json,.html,.xml,.log,text/*"></label><button class="btn sm" data-rq-no="${r.id}">Can't provide</button><span class="rq-files" data-rq-files="${r.id}">${files}</span></div></div>`;
   };
