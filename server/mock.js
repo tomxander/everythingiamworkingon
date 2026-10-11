@@ -437,6 +437,11 @@ export function siteEvidence(snapshot) {
   return out;
 }
 
+function externalLines(ext) {
+  if (!ext) return '- Not searched in this run.';
+  const lines = ext.queries.filter((q) => q.results.length).flatMap((q) => q.results.slice(0, 2).map((r) => `- [${q.source}] ${r.title} (${r.url})`));
+  return lines.join('\n') || (ext.searchesOk ? '- Searches ran and found nothing about this company outside its own site. This was raised with God.' : '- Outside search was unavailable.');
+}
 export function heuristicProfile(snapshot, brief) {
   const pages = snapshot.pages; const home = pages[0];
   const heads = pages.flatMap((p) => p.headings.filter((h) => h.level <= 2).map((h) => h.text)).filter((v, i, a) => a.indexOf(v) === i).slice(0, 10);
@@ -461,6 +466,9 @@ ${heads.map((h) => `- ${h}`).join('\n')}
 
 ## Automatic observations
 ${siteFindings(snapshot).map((f) => `- ${f}`).join('\n') || '- none'}
+
+## Outside the site
+${externalLines(snapshot.external)}
 
 ## Not verified from outside the company
 - Traffic volume and sources, current conversion rate, lead quality, sales process and CRM, budget, ideal customer profile and competitors.${brief ? `\n\n## Brief\n${brief.slice(0, 600)}` : ''}`;
@@ -525,3 +533,18 @@ export function pickName(seedStr, taken = new Set()) {
   for (let i = 0; i < 60; i++) { const first = FIRST[(h + i * 7) % FIRST.length]; if (!taken.has(first.toLowerCase())) return { first, last: LAST[(h >> 4 + i) % LAST.length] || LAST[0] }; }
   return { first: `Hire${h % 100}`, last: LAST[h % LAST.length] };
 }
+
+// What each playbook would really want from the client, as [kind, what, why, brief-hint-that-means-it-was-supplied].
+export const DATA_NEEDS = {
+  analytics: ['data', 'Last 90 days of analytics: sessions, leads and conversions by source and landing page (a CSV export is fine)', 'Without a baseline the target and the measurement plan are guesses.', 'analytics export|ga4 data|attached'],
+  attribution: ['data', 'How leads are tracked today: CRM source field, UTM use, and the last 90 days of leads by source', 'Attribution advice depends on what is already captured.', 'utm|crm export|attached'],
+  'seo-audit': ['data', 'Google Search Console export for the last 90 days: queries, pages, clicks, impressions', 'The audit can only see the site, not how Google sees it.', 'search console|gsc|attached'],
+  ads: ['data', 'Ad account results by campaign for the last 90 days: spend, conversions and cost per lead', 'A test plan needs the current cost per lead as its starting point.', 'cpa|cost per lead|ad account|attached'],
+  cro: ['data', 'Funnel numbers for the last 30 days: visitors, form starts and submissions by key page', 'Conversion work should start from where people actually drop off.', 'conversion rate|funnel|attached'],
+  emails: ['data', 'Email list size and results (open, click, reply) for the last five campaigns', 'Sequence advice depends on current list health.', 'open rate|list size|attached'],
+  pricing: ['document', 'Current price list and plan mix, with the number of customers on each plan', 'Pricing changes cannot be sized without it.', 'price list|plan mix|attached'],
+  'customer-research': ['document', 'Any customer interviews, reviews, survey results or support tickets you can share', 'Real customer language beats inferred language.', 'interviews|survey|attached'],
+  copywriting: ['document', 'Brand voice guide, copy that has performed well, and any claims legal has approved', 'Copy needs the approved voice and the claims it may make.', 'brand voice|style guide|attached'],
+  competitors: ['question', 'Which two or three competitors do you actually lose deals to?', 'Public search shows who ranks, not who you compete with in sales.', 'competitors?:'],
+  'cold-email': ['data', 'A list of your best past customers, or a CRM export of recent wins, to build the target list from', 'Outbound targeting is only as good as the example customers.', 'crm export|customer list|attached'],
+};

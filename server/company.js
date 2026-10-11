@@ -13,6 +13,7 @@ import { collab } from './collab.js';
 import { hiring } from './hiring.js';
 import { learning } from './learning.js';
 import { hr } from './hr.js';
+import { inbox } from './inbox.js';
 
 const MAX_ACTIVE_TASKS = Number(process.env.MAX_ACTIVE_TASKS || 3);
 const CLIENT_TTL = 6 * 3600 * 1000; // re-read a client's site after 6 hours
@@ -145,6 +146,7 @@ export class Company extends EventEmitter {
         this.sim.say(vera, 'Turning that into a proper brief…', 4);
         // 2. Intake: a one-line instruction becomes an objective, a metric, assumptions and open questions.
         task.intake = await this.makeIntake(task, tok);
+        this.raiseIntakeQuestions(task);
         this.pushTask(task);
         this.addComms({ from: 'vera', to: 'all', kind: 'task', taskId: task.id, text: `Intake for ${task.id}: ${task.intake.objective}. Metric: ${task.intake.metric}. Target: ${task.intake.target}. ${task.intake.openQuestions.length} open question(s) logged for God; proceeding on stated assumptions.` });
         this.sim.say(vera, 'Who does this need?', 3);
@@ -295,6 +297,7 @@ export class Company extends EventEmitter {
       this.account(task, res);
 
       const d = this.saveDeliverable(task, sub, a, res);
+      if (res.simulated) this.mockDataNeeds(task, a, sub);
       sub.outputId = d.id; sub.headline = res.headline || headlineOf(res.text); sub.status = 'done'; sub.ended = Date.now();
       a.stats.tasks++; a.stats.deliverables++; a.stats.tokens += (res.usage?.input || 0) + (res.usage?.output || 0); a.stats.words += res.text.split(/\s+/).length;
       a.skillUse[sub.skill] = (a.skillUse[sub.skill] || 0) + 1; this.skillUse[sub.skill] = (this.skillUse[sub.skill] || 0) + 1;
@@ -469,6 +472,7 @@ export class Company extends EventEmitter {
     for (const src of task.sources || []) {
       parts.push(`## Sources read for ${src.host}\n${src.pages.map((p) => `- ${p.url}${p.title ? ` (${p.title})` : ''}`).join('\n') || '- none'}${src.errors.length ? `\nCould not read: ${src.errors.map((e) => `${e.url} (${e.error})`).join('; ')}` : ''}`);
     }
+    const asked = this.requestsText(task); if (asked) parts.push(asked);
     if (task.urls?.length && !(task.sources || []).some((x) => x.pages.length)) parts.push(`## IMPORTANT\nThe request names ${task.urls.join(', ')} but the site could not be read. Nothing about it is verified. Do not invent facts about the company; label everything about it "Not verified".`);
     return clip(parts.join('\n\n') || '## Client context\n(No website or structured context available. Work only from the request and mark assumptions.)', max);
   }
@@ -498,6 +502,7 @@ export class Company extends EventEmitter {
           if (snapshot.pages.length) this.clients.set(host, entry);
         }
         const snap = entry.snapshot; const findings = siteFindings(snap);
+        if (i === 0 && !entry.external && this.outsideResearch !== false && (this.webResearch || this.llm.mode !== 'mock')) { sim.say(sol, `Looking beyond ${host}…`, 4); entry.external = await this.externalResearch(task, sol, host, snap); this.clients.set(host, entry); }
         task.sources.push({ host, url, cached, pages: snap.pages.map((p) => ({ url: p.url, title: p.title, words: p.words })), errors: snap.errors, findings });
         if (!snap.pages.length) {
           const why = snap.errors?.[0]?.error || 'unknown error';
@@ -511,8 +516,8 @@ export class Company extends EventEmitter {
           const res = await this.llm.complete({
             kind: 'profile', maxTokens: 2500, ...this.toolkit(sol, task, { light: true }),
             system: [`${COMPANY.charter}\n\nYou are ${sol.name}, ${sol.role}. ${sol.persona}`, skillPrompt(skill, 9000)],
-            user: `Build the client profile for ${host} using ONLY the evidence below plus the request. Follow the structure of the product-marketing context document (overview, audience, offer and positioning, proof, conversion path, tracking, competitors if visible, brand voice). Cite page URLs. Put everything you cannot see from outside (traffic, conversion rate, lead quality, sales process, budget, ICP details) under a "Not verified" heading instead of guessing.\n\nRequest: ${task.title}\n${task.brief}\n\n# Evidence read from the site\n${snapshotToText(snap, { perPage: 2500, total: 16000 })}`,
-            ctx: { title: task.title, brief: task.brief, snapshot: snap },
+            user: `Build the client profile for ${host} using ONLY the evidence below plus the request. Follow the structure of the product-marketing context document (overview, audience, offer and positioning, proof, conversion path, tracking, competitors if visible, brand voice). Cite page URLs. Put everything you cannot see from outside (traffic, conversion rate, lead quality, sales process, budget, ICP details) under a "Not verified" heading instead of guessing.\n\nRequest: ${task.title}\n${task.brief}\n\n# Evidence read from the site\n${snapshotToText(snap, { perPage: 2500, total: 16000 })}${externalToText(entry.external)}`,
+            ctx: { title: task.title, brief: task.brief, snapshot: { ...snap, external: entry.external } },
           });
           if (res.simulated) await this.sleepSim(Math.min(6, res.latencyMs / 1000), tok);
           this.account(task, res);
@@ -526,6 +531,26 @@ export class Company extends EventEmitter {
     });
     void profileText;
     task.status = 'planning'; this.pushTask(task);
+  }
+
+  /**
+   * The client's own site is one source. Search the wider internet for what others say about them: news, reviews,
+   * competitors, background and forum talk. If searches worked but found nothing, that gap goes to God's tracker.
+   */
+  async externalResearch(task, sol, host, snap) {
+    const brand = host.split('.')[0]; const queries = [
+      { source: 'news', q: brand }, { source: 'web', q: `${host} reviews` }, { source: 'web', q: `${brand} competitors alternatives` },
+      { source: 'wiki', q: brand }, { source: 'reddit', q: `${brand} ${host}` },
+    ];
+    const out = []; let ok = 0, found = 0;
+    for (const { source, q } of queries) {
+      try { const results = await webSearch(q, { source, max: 4 }); ok++; found += results.length; out.push({ source, q, results }); this.talk(task, { from: sol.id, to: 'all', kind: 'research', text: `Searched ${source === 'web' ? 'the web' : source} for "${clip(q, 50)}": ${results.length} result(s)` }); }
+      catch (e) { out.push({ source, q, results: [], error: clip(e.message, 120) }); }
+    }
+    const ext = { at: Date.now(), queries: out, found, searchesOk: ok };
+    if (ok > 0 && found === 0) this.raiseRequest(task, sol, { kind: 'question', what: `Who are ${host}'s main competitors, and what do their customers say about them? Public search found nothing about them outside their own site.`, why: 'Positioning and competitor work need outside evidence.', tried: `Searched news, web, wiki and forums for "${brand}" and "${host}": no results.`, origin: 'research' });
+    else if (ok === 0) this.addLog(`Outside search was unavailable for ${host}: ${out[0]?.error || 'unknown'}`, { type: 'system', agent: sol.id, taskId: task.id });
+    return ext;
   }
 
   /** Vera turns a vague instruction into an objective, metric, assumptions and open questions. */
@@ -673,7 +698,7 @@ export class Company extends EventEmitter {
       const data = {
         v: 1, savedAt: Date.now(), seq: this.seq, completed: this.completed, simTime: this.sim.time, skillUse: this.skillUse, history: this.history,
         tasks: [...this.tasks.values()], deliverables: [...this.deliverables.values()], comms: this.comms.slice(-300), log: this.log.slice(-400), agents,
-        llmTotals: this.llm.totals, budgetCap: this.budgetCap, clients: [...this.clients.values()], hires: [...this.hires.values()], settings: { collab: this.collab, hiringMode: this.hiringMode }, hr: this.hrSave(),
+        llmTotals: this.llm.totals, budgetCap: this.budgetCap, clients: [...this.clients.values()], hires: [...this.hires.values()], settings: { collab: this.collab, hiringMode: this.hiringMode }, hr: this.hrSave(), inbox: this.inboxSave(),
       };
       const tmp = path.join(this.dataDir, 'state.json.tmp');
       fs.writeFileSync(tmp, JSON.stringify(data)); fs.renameSync(tmp, path.join(this.dataDir, 'state.json'));
@@ -690,7 +715,7 @@ export class Company extends EventEmitter {
       for (const h of d.hires || []) { if (!this.sim.agents.has(h.id) && this.sim.map.desks[h.room]?.[h.slot]) { this.sim.addAgent(h); this.hires.set(h.id, h); } }
       if (d.settings?.collab && !process.env.COLLAB) this.collab = d.settings.collab;
       if (d.settings?.hiringMode && !process.env.HIRING) this.hiringMode = d.settings.hiringMode;
-      this.kb.load(); this.hrLoad(d.hr);
+      this.kb.load(); this.hrLoad(d.hr); this.inboxLoad(d.inbox);
       for (const t of d.tasks || []) {
         if (['planning', 'active', 'review', 'queued'].includes(t.status)) { t.status = 'interrupted'; t.error = 'Server restarted while this was running. Use Retry.'; t.subtasks.forEach((s) => { if (s.status === 'working' || s.status === 'ready') s.status = 'waiting'; }); }
         this.tasks.set(t.id, t);
@@ -706,6 +731,12 @@ export class Company extends EventEmitter {
   }
 }
 
+function externalToText(ext) {
+  if (!ext) return '';
+  const body = ext.queries.filter((x) => x.results.length).map((x) => `## ${x.source}: "${x.q}"\n${x.results.map((r) => `- ${r.title} (${r.url}) ${r.snippet}`).join('\n')}`).join('\n\n');
+  return `\n\n# Evidence from outside the site (search snippets only: treat as leads to check, not verified facts)\n${body || (ext.searchesOk ? '(searches ran and found nothing about this company outside its own site)' : '(outside search was unavailable)')}`;
+}
+
 function headlineOf(md) {
   const lines = md.split('\n');
   let inAssump = false;
@@ -718,4 +749,4 @@ function headlineOf(md) {
   return clip((md.replace(/^#.*$/gm, '').replace(/[*`_>#]/g, '').replace(/\s+/g, ' ').trim()), 140);
 }
 
-Object.assign(Company.prototype, collab, hiring, learning, hr);
+Object.assign(Company.prototype, collab, hiring, learning, hr, inbox);

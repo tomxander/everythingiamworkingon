@@ -5,6 +5,7 @@
 //   - handoffs: finished work is handed to the next owner in person, with what they must know
 //   - alignment: before the summary, Vera looks for real conflicts between deliverables and decides
 //   - escalation: failed work goes to the lead, then gets one retry or is cut with a note
+import { REQUEST_TOOL } from './inbox.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { COMPANY } from './roster.js';
@@ -263,6 +264,7 @@ export const collab = {
     const log = (t) => { sim.say(a, t, 3); this.talk(task, { from: a.id, to: 'all', text: t, kind: 'research' }); };
     if (!light) {
       tools.push(ASK_TOOL); extra.ask_teammate = (inp) => this.askTeammate(a, task, inp, state);
+      tools.push(REQUEST_TOOL); extra.request_info = (inp) => this.toolRequest(a, task, inp);
       if (this.hiringMode !== 'off') { tools.push(HIRE_TOOL); extra.request_hire = (inp) => this.toolHire(a, task, inp); }
       if (this.kb.mode === 'active') { tools.push(SAVE_TOOL, RECALL_TOOL); extra.save_lesson = (inp) => this.toolSaveLesson(a, task, inp, state); extra.recall_lessons = (inp) => this.toolRecall(a, task, inp); }
     }

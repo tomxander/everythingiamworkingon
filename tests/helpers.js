@@ -9,7 +9,7 @@ import { Life } from '../server/life.js';
 import { LLM } from '../server/llm.js';
 import { Company } from '../server/company.js';
 
-export function world({ life = false, learning = 'passive', web = false, collab = 'full', hiring = 'auto', syncFor = null } = {}) {
+export function world({ life = false, learning = 'passive', web = false, collab = 'full', hiring = 'auto', syncFor = null, outside = false } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '4evr-'));
   const map = buildMap();
   const skills = loadSkills([{ dir: SKILLS_DIR, source: 'marketing' }, { dir: HR_SKILLS_DIR, source: 'hr' }]);
@@ -20,7 +20,7 @@ export function world({ life = false, learning = 'passive', web = false, collab 
   const l = new Life(sim, company);
   company.skillIndexFn = () => Object.values(skills).map((s) => ({ name: s.name }));
   if (sync) company.attachSkillSync(sync);
-  company.life = l; company.webResearch = web; company.kb.mode = learning; company.collab = collab; company.hiringMode = hiring;
+  company.life = l; company.webResearch = web; company.kb.mode = learning; company.collab = collab; company.outsideResearch = outside; company.hiringMode = hiring;
   if (life) l.start();
   return { map, skills, llm, sim, company, life: l, tmp, sync };
 }

@@ -50,6 +50,6 @@ test('tool use is budgeted and custom company tools can be plugged in', async ()
   clearSearchCache(); mode = 'ddg';
   const h = makeToolHandler({ skill: null, extra: { ping: async (i) => `pong ${i.x}` } });
   assert.equal(await h('ping', { x: 7 }), 'pong 7');
-  let last; for (let i = 0; i < 7; i++) last = await h('web_search', { query: `budget test ${i}` });
+  let last; for (let i = 0; i < 9; i++) last = await h('web_search', { query: `budget test ${i}` });
   assert.match(last, /Search limit reached/);
 });

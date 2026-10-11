@@ -246,11 +246,35 @@ export function parseSearchResults(html, max = 8) {
   return out.slice(0, max);
 }
 
-/** Search the web. Returns [{title, url, snippet}]. Throws a clear error if no engine answers. */
-export async function webSearch(query, { max = 6 } = {}) {
+// Beyond the general engines: news, encyclopaedia, forums and Hacker News. Each is a public, keyless endpoint
+// (override with SEARCH_NEWS_ENDPOINT, SEARCH_WIKI_ENDPOINT, SEARCH_REDDIT_ENDPOINT, SEARCH_HN_ENDPOINT for tests).
+export const SEARCH_SOURCES = ['web', 'news', 'wiki', 'reddit', 'hn'];
+const decodeXml = (t) => String(t || '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+const stripXml = (t) => decodeXml(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+const SOURCE_DEFS = {
+  news: { env: 'SEARCH_NEWS_ENDPOINT', url: 'https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en', parse: (body) => [...body.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => { const g = (tag) => (m[1].match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`)) || [])[1]; return { title: stripXml(g('title')), url: stripXml(g('link')), snippet: [stripXml(g('pubDate')), stripXml(g('description'))].filter(Boolean).join(' · ').slice(0, 240) }; }) },
+  wiki: { env: 'SEARCH_WIKI_ENDPOINT', url: 'https://en.wikipedia.org/w/api.php?action=opensearch&search={q}&limit=8&format=json', parse: (body) => { const j = JSON.parse(body); return (j[1] || []).map((t, i) => ({ title: t, url: (j[3] || [])[i], snippet: (j[2] || [])[i] || '' })); } },
+  hn: { env: 'SEARCH_HN_ENDPOINT', url: 'https://hn.algolia.com/api/v1/search?query={q}&hitsPerPage=8', parse: (body) => (JSON.parse(body).hits || []).map((h) => ({ title: h.title || h.story_title || '(untitled)', url: h.url || `https://news.ycombinator.com/item?id=${h.objectID}`, snippet: `${h.points ?? 0} points, ${h.num_comments ?? 0} comments${h.story_text ? ' · ' + stripXml(h.story_text).slice(0, 160) : ''}` })) },
+  reddit: { env: 'SEARCH_REDDIT_ENDPOINT', url: 'https://www.reddit.com/search.json?q={q}&limit=8&sort=relevance', parse: (body) => (JSON.parse(body).data?.children || []).map((c) => c.data).map((d) => ({ title: d.title, url: `https://www.reddit.com${d.permalink}`, snippet: `r/${d.subreddit}, ${d.score} points${d.selftext ? ' · ' + d.selftext.replace(/\s+/g, ' ').slice(0, 160) : ''}` })) },
+};
+
+/** Search the internet. source: web (default) | news | wiki | reddit | hn. Returns [{title, url, snippet}]; throws a clear error if nothing answers. */
+export async function webSearch(query, { max = 6, source = 'web' } = {}) {
   const q = String(query || '').trim().slice(0, 200); if (!q) throw new Error('Empty search query.');
-  const hit = searchCache.get(q.toLowerCase()); if (hit && Date.now() - hit.at < SEARCH_TTL) return hit.results.slice(0, max);
-  const wait = 1200 - (Date.now() - lastSearchAt); if (wait > 0) await new Promise((r) => setTimeout(r, wait)); lastSearchAt = Date.now();
+  if (!SEARCH_SOURCES.includes(source)) source = 'web';
+  const key = `${source}:${q.toLowerCase()}`;
+  const hit = searchCache.get(key); if (hit && Date.now() - hit.at < SEARCH_TTL) return hit.results.slice(0, max);
+  const wait = Number(process.env.SEARCH_GAP_MS ?? 1200) - (Date.now() - lastSearchAt); if (wait > 0) await new Promise((r) => setTimeout(r, wait)); lastSearchAt = Date.now();
+  if (source !== 'web') {
+    const def = SOURCE_DEFS[source];
+    try {
+      const res = await rawGet((process.env[def.env] || def.url).replace('{q}', encodeURIComponent(q)), 0, { headers: { accept: 'application/json, application/rss+xml, */*' } });
+      if (res.status >= 400) throw new Error(`${source} search returned HTTP ${res.status}`);
+      const results = def.parse(res.body).filter((r) => r.title && r.url);
+      if (!results.length) return []; // a real, empty answer: there is nothing out there under that name
+      searchCache.set(key, { at: Date.now(), results }); return results.slice(0, max);
+    } catch (e) { throw new Error(`${source} search failed: ${e.message}`); }
+  }
   const engines = process.env.SEARCH_ENDPOINT ? [process.env.SEARCH_ENDPOINT] : ['https://html.duckduckgo.com/html/?q={q}', 'https://www.bing.com/search?q={q}'];
   let lastErr;
   for (const tpl of engines) {
@@ -260,7 +284,7 @@ export async function webSearch(query, { max = 6 } = {}) {
       if (/anomaly|unusual traffic|captcha|verify you are a human/i.test(res.body.slice(0, 6000)) && !/result__a|b_algo/.test(res.body)) throw new Error('the search engine asked for a human check');
       const results = parseSearchResults(res.body, 10);
       if (!results.length) throw new Error('no results could be read from the search engine');
-      searchCache.set(q.toLowerCase(), { at: Date.now(), results });
+      searchCache.set(key, { at: Date.now(), results });
       return results.slice(0, max);
     } catch (e) { lastErr = e; }
   }
@@ -275,7 +299,7 @@ export function searchToText(query, results) { return wrapUntrusted(`search: ${q
 // ---------------------------------------------------------------- tool definitions for live agents
 export const TOOL_DEFS = [
   { name: 'fetch_url', description: 'Fetch and read a public web page. Returns the title, meta description, headings, calls to action, forms, detected tracking and the main text. Use it to verify facts about the client, their pages or competitors instead of guessing. Only public http(s) pages work.', input_schema: { type: 'object', properties: { url: { type: 'string', description: 'The full URL or domain to read.' } }, required: ['url'] } },
-  { name: 'web_search', description: 'Search the internet. Returns titles, URLs and snippets. Use it for competitors, benchmarks, market facts, tools, recent news and best practice. Then read the promising results with fetch_url before relying on them.', input_schema: { type: 'object', properties: { query: { type: 'string', description: 'A specific search query.' } }, required: ['query'] } },
+  { name: 'web_search', description: 'Search the wider internet, not just the client\'s site. Returns titles, URLs and snippets. Pick a source: web (default: competitors, benchmarks, tools, best practice), news (recent coverage), wiki (company and industry background), reddit (what real customers say), hn (founder and tech discussion). Search from several angles, then read the promising results with fetch_url before relying on them.', input_schema: { type: 'object', properties: { query: { type: 'string', description: 'A specific search query.' }, source: { type: 'string', enum: ['web', 'news', 'wiki', 'reddit', 'hn'], description: 'Where to search. Default web.' } }, required: ['query'] } },
   { name: 'read_skill_reference', description: 'Read one of the reference files that belongs to your active skill (they are listed at the end of the skill text, for example "references/benchmarks.md" or "content/guide.md"). Use when the skill tells you to consult a reference or you want a worked example or prompt.', input_schema: { type: 'object', properties: { file: { type: 'string', description: 'The reference path as listed, for example "content/guide.md".' } }, required: ['file'] } },
 ];
 
@@ -289,8 +313,8 @@ export function makeToolHandler({ skill, log, extra = {} }) {
       try { const p = await fetchPage(input.url); log?.(`Read ${p.url}`); return wrapUntrusted(p.url, pageToText(p, 6000)); } catch (e) { log?.(`Could not read ${input.url}: ${e.message}`); return `Could not read that page: ${e.message}. Say clearly in your deliverable that this could not be verified.`; }
     }
     if (name === 'web_search') {
-      if (++searches > 5) return 'Search limit reached for this piece of work. Use what you have and state what you could not verify.';
-      try { const r = await webSearch(input.query); log?.(`Searched the web: "${clip(String(input.query), 70)}"`); return searchToText(input.query, r); } catch (e) { log?.(`Search failed: ${e.message}`); return `${e.message}. Say clearly in your deliverable that this could not be verified.`; }
+      if (++searches > 8) return 'Search limit reached for this piece of work. Use what you have and state what you could not verify.';
+      try { const src = SEARCH_SOURCES.includes(input.source) ? input.source : 'web'; const r = await webSearch(input.query, { source: src }); log?.(`Searched ${src === 'web' ? 'the web' : src}: "${clip(String(input.query), 70)}"`); return searchToText(input.query, r); } catch (e) { log?.(`Search failed: ${e.message}`); return `${e.message}. Say clearly in your deliverable that this could not be verified.`; }
     }
     if (name === 'read_skill_reference') {
       // accept "content/guide.md" or just "guide.md"; only files listed for this skill can be opened
