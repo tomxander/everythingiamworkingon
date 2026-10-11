@@ -1,10 +1,12 @@
 # 4EVR HQ
 
-**The world's best marketing company, run by a pixel-art office full of AI agents. You are God.**
+**A marketing agency run entirely by AI agents, in a pixel-art office. You play God.**
 
-Fourteen specialists work, talk, take coffee breaks and pet the office dog in a top-down pixel-art headquarters. You give them commands from the **God Console**. The CMO plans the work, specialists do it with real playbooks, teammates consult and review each other, and the team gathers at the Town Hall when a task ships. Every message, token, deliverable and skill use is tracked.
+I built 4EVR as an experiment: what if a marketing agency were a team of AI specialists you could watch work? Fourteen agents live in a top-down pixel-art headquarters. They walk around, take coffee breaks, chat, consult each other and do real marketing work. I give them commands from the **God Console**, and the CMO plans each job, hands it to the right specialists, reviews the results and reports back. Every message, token and deliverable is tracked.
 
-Their expertise is the open-source [marketingskills](https://github.com/coreyhaines31/marketingskills) library (50 skills, MIT, vendored in `vendor/marketingskills`). Each agent loads the full `SKILL.md` playbooks of the skills it owns, so Rafa the SEO lead really works from `seo-audit` and Oskar from `churn-prevention`.
+Each agent's expertise comes from the open-source [marketingskills](https://github.com/coreyhaines31/marketingskills) library (50 skills, MIT, vendored in `vendor/marketingskills`). Every specialist loads the full playbooks for the skills they own, so the SEO lead works from `seo-audit` and the lifecycle lead from `churn-prevention`.
+
+Built by [@tomxander](https://github.com/tomxander), with [Claude Code](https://claude.ai/code) as my pair-programming partner.
 
 ```
 npm install
@@ -103,4 +105,6 @@ npm test
 
 ## Credits
 
-Skills by [Corey Haines](https://github.com/coreyhaines31/marketingskills) (MIT). Everything else is procedural: the sprites, furniture and floors are drawn in code.
+- Created by [@tomxander](https://github.com/tomxander), built with Claude Code.
+- Marketing skills by [Corey Haines](https://github.com/coreyhaines31/marketingskills), used under the MIT licence (see `vendor/marketingskills/LICENSE`).
+- Everything else is original and procedural: the sprites, furniture and floors are all drawn in code.
