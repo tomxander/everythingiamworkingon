@@ -4,19 +4,21 @@
 import { mockComplete } from './mock.js';
 import { ClaudeCli, McpBridge } from './claude-cli.js';
 import { currentSignal, throwIfCancelled, sleep, Cancelled } from './cancel.js';
+import { catalogEntry, mergeModels, DEFAULT_MODEL } from './models.js';
 
 const API_URL = process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
-// Pricing is a user-supplied estimate (USD per million tokens). Defaults are placeholders; set PRICE_IN / PRICE_OUT.
-const PRICE_IN = Number(process.env.PRICE_IN ?? 3);
-const PRICE_OUT = Number(process.env.PRICE_OUT ?? 15);
+// Prices (USD per million tokens) come from the model catalog for the selected model. PRICE_IN / PRICE_OUT override
+// them (for negotiated rates); a model the catalog does not know falls back to $3 / $15.
+const PRICE_OVERRIDE = process.env.PRICE_IN || process.env.PRICE_OUT ? { in: Number(process.env.PRICE_IN ?? 3), out: Number(process.env.PRICE_OUT ?? 15), source: 'env' } : null;
 const TIMEOUT_MS = Number(process.env.API_TIMEOUT_MS || 180000);
-const MIN_TOKENS = Number(process.env.MIN_MAX_TOKENS || 1500);
+const MIN_TOKENS = Number(process.env.MIN_MAX_TOKENS || 4096); // current models think by default and thinking counts against max_tokens
 const API_CONCURRENCY = Number(process.env.API_CONCURRENCY || 4); // several agents work at once; low-tier keys hit per-minute limits fast
 
 export class LLM {
   constructor() {
     this.apiKey = process.env.ANTHROPIC_API_KEY || '';
-    this.model = process.env.MODEL || 'claude-sonnet-5-5';
+    this.model = process.env.MODEL || DEFAULT_MODEL;
+    this.liveModels = null; this.liveModelsAt = 0; this.modelsError = null;
     this.mode = this.apiKey ? 'live' : 'mock';
     this.totals = { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cost: 0, simulated: this.mode === 'mock' };
     this.lastError = null;
@@ -26,7 +28,7 @@ export class LLM {
   }
 
   status() {
-    return { mode: this.mode, hasKey: !!this.apiKey, model: this.model, totals: { ...this.totals }, lastError: this.lastError, price: { in: PRICE_IN, out: PRICE_OUT }, cli: this.cliStatus() };
+    return { mode: this.mode, hasKey: !!this.apiKey, model: this.model, totals: { ...this.totals }, lastError: this.lastError, price: this.price(), models: mergeModels(this.liveModels), modelsError: this.modelsError, cli: this.cliStatus() };
   }
 
   // ---------------- Claude account (CLI) mode
@@ -83,12 +85,40 @@ export class LLM {
     } catch (e) { return { ok: false, ms: Date.now() - t0, error: e.message }; }
   }
 
-  setModel(model) { if (model) this.model = model; }
+  setModel(model) {
+    model = String(model || '').trim();
+    if (!/^[a-zA-Z0-9._:@\/-]{2,80}$/.test(model)) throw new Error('That does not look like a model ID.');
+    this.model = model;
+  }
+
+  /** Price per million tokens for the current model. */
+  price() {
+    if (PRICE_OVERRIDE) return PRICE_OVERRIDE;
+    const m = catalogEntry(this.model); return m ? { in: m.in, out: m.out, source: 'catalog' } : { in: 3, out: 15, source: 'unknown' };
+  }
+
+  /** The models this API key can use, from the Models API (cached for ten minutes). */
+  async listModels({ force = false } = {}) {
+    if (!this.apiKey) return mergeModels(null);
+    if (!force && this.liveModels && Date.now() - this.liveModelsAt < 600000) return mergeModels(this.liveModels);
+    try {
+      const all = []; let after = null;
+      for (let page = 0; page < 10; page++) {
+        const url = `${API_URL}/v1/models?limit=100${after ? `&after_id=${encodeURIComponent(after)}` : ''}`;
+        const res = await fetch(url, { headers: { 'x-api-key': this.apiKey, 'anthropic-version': '2023-06-01' }, signal: AbortSignal.timeout(15000) });
+        const raw = await res.text(); let json = null; try { json = JSON.parse(raw); } catch { /* not JSON */ }
+        if (!res.ok) throw new Error(json?.error?.message || `Models API ${res.status}`);
+        all.push(...(json?.data || []).filter((m) => m?.id)); if (!json?.has_more) break; after = json.last_id;
+      }
+      this.liveModels = all; this.liveModelsAt = Date.now(); this.modelsError = null;
+    } catch (e) { this.modelsError = `Could not list models (${e.message}). Showing the built-in list.`; }
+    return mergeModels(this.liveModels);
+  }
 
   account(inTok, outTok, cacheRead = 0) {
     this.totals.calls++;
     this.totals.inputTokens += inTok; this.totals.outputTokens += outTok; this.totals.cacheReadTokens += cacheRead;
-    this.totals.cost += (inTok * PRICE_IN + outTok * PRICE_OUT) / 1e6;
+    const p = this.price(); this.totals.cost += (inTok * p.in + outTok * p.out + cacheRead * p.in * 0.1) / 1e6; // cache reads bill at about a tenth of input
   }
 
   /**

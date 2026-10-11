@@ -9,7 +9,7 @@
 ### A marketing agency run by AI agents, with a control room to match.
 
 ![Node](https://img.shields.io/badge/node-%E2%89%A5%2020-163144?style=flat-square&labelColor=1B405B)
-![Tests](https://img.shields.io/badge/tests-135%20passing-163144?style=flat-square&labelColor=1B405B)
+![Tests](https://img.shields.io/badge/tests-137%20passing-163144?style=flat-square&labelColor=1B405B)
 ![Dependencies](https://img.shields.io/badge/dependencies-1-163144?style=flat-square&labelColor=1B405B)
 ![Modes](https://img.shields.io/badge/modes-simulated%20%C2%B7%20API%20%C2%B7%20Claude%20account-163144?style=flat-square&labelColor=1B405B)
 
@@ -45,7 +45,7 @@ npm start
 
 Open **http://127.0.0.1:4747**, type an instruction into the God console at the bottom, and press Assign.
 
-There are three ways to run the agents. You can switch between them in Settings at any time.
+There are three ways to run the agents. You can switch between them in Settings at any time, and pick the model from a list there: Claude Opus 5.5 (the default), Sonnet 5.5, Haiku 5.5, Fable 5.1 and older models, each shown with its price. With an API key the list comes from your account, so it only shows models your key can use. Cost estimates and the budget cap follow the selected model's list price.
 
 | | Simulated | API key | Claude account |
 |---|---|---|---|
@@ -272,12 +272,12 @@ A light, frosted-glass control room built to match a calm, high-contrast design 
 | `ANTHROPIC_API_KEY` | none | Enables API-key mode. |
 | `CLAUDE_ACCOUNT` | off | `on` starts in Claude account mode when the `claude` CLI is available. |
 | `CLAUDE_BIN`, `CLI_CONCURRENCY` | `claude`, `3` | Path to the CLI, and how many agent calls may run at once in Claude account mode. |
-| `MODEL` | `claude-sonnet-5-5` | Model used for all agent calls. |
-| `PRICE_IN`, `PRICE_OUT` | `3`, `15` | USD per million input and output tokens, for cost estimates. Placeholders: set your real rates. |
+| `MODEL` | `claude-opus-5-5` | Model used for all agent calls. Usually chosen in Settings instead (the choice is remembered); this variable overrides it. |
+| `PRICE_IN`, `PRICE_OUT` | the model's list price | USD per million input and output tokens for cost estimates. Only needed if your rates differ from list prices, or for a model the app does not know. |
 | `BUDGET_CAP_USD` | `5` | Estimated spend at which a live run reverts to simulation. |
 | `MAX_ACTIVE_TASKS` | `3` | Concurrent tasks. |
 | `API_TIMEOUT_MS` | `180000` | Per-call timeout for model calls. |
-| `API_CONCURRENCY`, `MIN_MAX_TOKENS` | `4`, `1500` | How many API calls run at once (low-tier keys hit per-minute limits), and the smallest output allowance per call (thinking counts against it). |
+| `API_CONCURRENCY`, `MIN_MAX_TOKENS` | `4`, `4096` | How many API calls run at once (low-tier keys hit per-minute limits), and the smallest output allowance per call (thinking counts against it). |
 | `INTAKE_TIMEOUT_S`, `PLAN_TIMEOUT_S` | `120`, `150` | Deadlines for the intake and planning calls. If one is missed, the task falls back (a generic brief, or the built-in playbook plan) and says so on the task card. |
 | `COLLAB` | `full` | Team conversation: `full`, `lean`, `off`. |
 | `HIRING`, `HIRE_MAX_HEADCOUNT`, `HIRE_LIMIT`, `HIRE_PER_TASK` | `auto`, `24`, `12`, `3` | Hiring mode and caps. |
@@ -391,7 +391,7 @@ The server is authoritative. It streams state to the browser over WebSocket at 1
 npm test
 ```
 
-135 tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (private-address and redirect protection, untrusted-content fencing), searching beyond the client's site, site crawling, the org chart, kickoff, handoffs, alignment, escalation, outside-expert consults, hiring policy and approval, People & Talent (requisitions, the rating rule, reports, releases needing approval), upstream skill sync (hardened archive reading against the real repositories, validation, overlay, rollback, approval), the knowledge base and learning loop, stopping and deleting tasks (including aborting calls in flight), the requests tracker, Claude account mode against a fake `claude` binary (sign-in, tool bridge, read-only connector rules, lookups), and the API-key path against scripted fakes of the Messages API: tool use, hiring mid-task, lessons, reflection, prompt-injection resistance, truncation recovery, revisions and timeouts, planning that falls back visibly instead of hanging, signed thinking blocks in tool loops, and full tasks against a strict fake of the API that enforces the real request rules.
+137 tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (private-address and redirect protection, untrusted-content fencing), searching beyond the client's site, site crawling, the org chart, kickoff, handoffs, alignment, escalation, outside-expert consults, hiring policy and approval, People & Talent (requisitions, the rating rule, reports, releases needing approval), upstream skill sync (hardened archive reading against the real repositories, validation, overlay, rollback, approval), the knowledge base and learning loop, stopping and deleting tasks (including aborting calls in flight), the requests tracker, Claude account mode against a fake `claude` binary (sign-in, tool bridge, read-only connector rules, lookups), and the API-key path against scripted fakes of the Messages API: tool use, hiring mid-task, lessons, reflection, prompt-injection resistance, truncation recovery, revisions and timeouts, planning that falls back visibly instead of hanging, signed thinking blocks in tool loops, and full tasks against a strict fake of the API that enforces the real request rules.
 
 </details>
 

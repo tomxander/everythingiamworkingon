@@ -549,11 +549,12 @@ function refreshSettings() { if (!$('#modal').hidden && $('#modal-card').dataset
 
 function openSettings() {
   const s = st.settings; if (!s) return;
+  if (s.hasKey && !st.modelsAsked) { st.modelsAsked = true; send({ type: 'listModels' }); }
   openModal(`<button class="btn close">✕</button><h2>Settings</h2><div class="muted">How the agents think.</div>
     ${modeNotice(s)}
     <label class="field-label">Anthropic API key ${s.hasKey ? '<span style="color:var(--green)">· set (held in server memory only)</span>' : ''}</label>
     <div class="row"><input class="field" style="flex:1" id="s-key" type="password" placeholder="${s.hasKey ? '•••••••• (leave blank to keep)' : 'sk-ant-…'}" autocomplete="off" /><button class="btn primary" id="s-save">${s.hasKey ? 'Update & go live' : 'Save & go live'}</button></div>
-    <label class="field-label">Model</label><div class="row"><input class="field" style="flex:1" id="s-model" value="${esc(s.model)}" /><button class="btn" id="s-model-save">Set</button></div>
+    ${modelPicker(s)}
     <label class="field-label">Budget cap (USD, estimated)</label><div class="row"><input class="field" style="flex:1" id="s-budget" type="number" min="0.1" step="0.5" value="${s.budgetCap}" /><button class="btn" id="s-budget-save">Set</button></div>
     <label class="field-label">Team conversation (cost vs. realism)</label><div class="row">${['full', 'lean', 'off'].map((m) => `<button class="btn ${s.collab === m ? 'primary' : ''}" data-collab="${m}">${m}</button>`).join('')}</div><div class="muted" style="font-size:11.5px;margin-top:4px">full: kickoff, handoffs, consults, alignment meetings. lean: fewer calls. off: agents just work. Each conversation turn is a small model call in live mode.</div>
     <label class="field-label">Hiring</label><div class="row">${['auto', 'ask', 'off'].map((m) => `<button class="btn ${s.hiring === m ? 'primary' : ''}" data-hiring="${m}">${m}</button>`).join('')}</div><div class="muted" style="font-size:11.5px;margin-top:4px">auto: the CMO and agents hire within the caps. ask: you approve each hire. off: no hiring.</div>
@@ -562,15 +563,31 @@ function openSettings() {
     <label class="field-label">Mode</label><div class="modes"><button class="btn ${s.mode === 'mock' ? 'primary' : ''}" id="s-mock">Simulated</button><button class="btn ${s.mode === 'live' ? 'primary' : ''}" id="s-live" ${s.hasKey ? '' : 'disabled'}>API key</button><button class="btn ${s.mode === 'cli' ? 'primary' : ''}" id="s-cli" ${s.cli?.available || !s.cli?.checked ? '' : 'disabled'}>Claude account</button>${s.mode !== 'mock' ? '<button class="btn" id="s-test">Test connection</button>' : ''}</div>
     ${connectorsBlock(s)}
     ${s.lastError ? `<div class="notice warn">Last API error: ${esc(s.lastError)}</div>` : ''}
-    <div class="notice" style="margin-top:16px">Prices used for cost estimates: $${s.price.in}/M input, $${s.price.out}/M output tokens (override with the <code>PRICE_IN</code> / <code>PRICE_OUT</code> env vars). Your key is never written to disk; you can also set <code>ANTHROPIC_API_KEY</code> before starting the server.</div>`, 'settings');
+    <div class="notice" style="margin-top:16px">Your API key is never written to disk; you can also set <code>ANTHROPIC_API_KEY</code> before starting. Cost figures are estimates from list prices; set <code>PRICE_IN</code> / <code>PRICE_OUT</code> if your rates differ.</div>`, 'settings');
   $('#s-save').onclick = () => { const key = $('#s-key').value.trim(); if (!key && !s.hasKey) return; send({ type: 'setKey', key: key || undefined, useLive: true }); if (!key) send({ type: 'setMode', mode: 'live' }); };
-  $('#s-model-save').onclick = () => send({ type: 'setModel', model: $('#s-model').value });
+  const pick = $('#s-model-pick'); const custom = $('#s-model-custom');
+  if (pick) pick.onchange = () => { if (pick.value === '__custom') { custom.hidden = false; $('#s-model').focus(); } else send({ type: 'setModel', model: pick.value }); };
+  const ms = $('#s-model-save'); if (ms) ms.onclick = () => { const v = $('#s-model').value.trim(); if (v) send({ type: 'setModel', model: v }); };
+  const mr = $('#s-model-refresh'); if (mr) mr.onclick = () => { mr.textContent = 'Refreshing…'; send({ type: 'listModels', force: true }); };
   $('#s-budget-save').onclick = () => send({ type: 'setBudget', value: $('#s-budget').value });
   $$('[data-skmode]', card).forEach((b) => (b.onclick = () => send({ type: 'setSkillsMode', value: b.dataset.skmode }))); $$('[data-sk-check]', card).forEach((b) => (b.onclick = () => { b.textContent = 'Checking…'; send({ type: 'skillsCheck', id: b.dataset.skCheck }); })); $$('[data-sk-rollback]', card).forEach((b) => (b.onclick = () => { if (confirm('Roll this skills library back to the previous version?')) send({ type: 'skillsRollback', id: b.dataset.skRollback }); })); $$('[data-sk-approve]', card).forEach((b) => (b.onclick = () => send({ type: 'skillsApprove', id: b.dataset.skApprove }))); $$('[data-sk-decline]', card).forEach((b) => (b.onclick = () => send({ type: 'skillsDecline', id: b.dataset.skDecline })));
   $$('[data-collab]', card).forEach((b) => (b.onclick = () => send({ type: 'setCollab', value: b.dataset.collab }))); $$('[data-hiring]', card).forEach((b) => (b.onclick = () => send({ type: 'setHiring', value: b.dataset.hiring }))); $$('[data-learning]', card).forEach((b) => (b.onclick = () => send({ type: 'setLearning', value: b.dataset.learning })));
   $('#s-mock').onclick = () => send({ type: 'setMode', mode: 'mock' }); $('#s-live').onclick = () => send({ type: 'setMode', mode: 'live' }); $('#s-cli').onclick = () => send({ type: 'setMode', mode: 'cli' }); const tst = $('#s-test'); if (tst) tst.onclick = () => send({ type: 'testLlm' });
   const scan = $('#cli-scan'); if (scan) scan.onclick = () => { scan.textContent = 'Scanning…'; scan.disabled = true; send({ type: 'cliScan' }); };
   $$('[data-conn]', card).forEach((b) => (b.onclick = () => send({ type: 'cliConnector', name: b.dataset.conn, on: b.dataset.on === '1' })));
+}
+
+function modelPicker(s) {
+  const models = s.models || []; const money = (v) => (v == null ? '' : v < 1 ? `$${v.toFixed(2)}` : `$${v}`);
+  const label = (x) => `${x.name}${x.in != null ? ` · ${money(x.in)} in / ${money(x.out)} out per M tokens` : ''}`;
+  const group = (title, list) => (list.length ? `<optgroup label="${esc(title)}">${list.map((x) => `<option value="${esc(x.id)}" ${x.id === s.model ? 'selected' : ''}>${esc(label(x))}</option>`).join('')}</optgroup>` : '');
+  const listed = models.some((x) => x.id === s.model); const cur = models.find((x) => x.id === s.model);
+  const live = models.some((x) => x.available);
+  return `<label class="field-label">Model <span class="muted">· ${live ? 'models available to your API key' : 'built-in list'}</span></label>
+    <div class="row"><select class="field" style="flex:1" id="s-model-pick">${group('Recommended', models.filter((x) => x.tier === 'recommended'))}${group('Older', models.filter((x) => x.tier === 'older'))}${group('Also on your key', models.filter((x) => x.tier === 'other'))}<option value="__custom" ${listed ? '' : 'selected'}>Custom model ID…</option></select>${s.hasKey ? '<button class="btn sm" id="s-model-refresh">Refresh list</button>' : ''}</div>
+    <div class="row" id="s-model-custom" style="margin-top:6px" ${listed ? 'hidden' : ''}><input class="field" style="flex:1" id="s-model" value="${esc(s.model)}" placeholder="e.g. claude-opus-5-5" /><button class="btn" id="s-model-save">Use this model</button></div>
+    <div class="muted" style="font-size:11.5px;margin-top:4px">${cur?.note ? `${esc(cur.note)} ` : ''}Cost estimates use ${s.price.source === 'env' ? 'your PRICE_IN / PRICE_OUT rates' : s.price.source === 'catalog' ? 'this model\'s list price' : 'a $3 / $15 placeholder (unknown model; set PRICE_IN / PRICE_OUT)'}: ${money(s.price.in)} / ${money(s.price.out)} per million tokens.${s.mode !== 'mock' ? ' Switching runs a connection test.' : ''}</div>
+    ${s.modelsError ? `<div class="muted" style="font-size:11.5px;color:#a1293a">${esc(s.modelsError)}</div>` : ''}`;
 }
 
 function modeNotice(s) {

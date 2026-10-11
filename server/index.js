@@ -34,6 +34,11 @@ const llm = new LLM();
 const sim = new Sim(map, AGENTS);
 const company = new Company({ sim, llm, skills, dataDir: DATA, deliverablesDir: DELIV });
 const life = new Life(sim, company);
+// The chosen model, remembered between runs (MODEL in the environment wins).
+const PREFS_FILE = path.join(DATA, 'prefs.json');
+function savePrefs() { try { fs.mkdirSync(DATA, { recursive: true }); fs.writeFileSync(PREFS_FILE, JSON.stringify({ model: llm.model })); } catch { /* best effort */ } }
+try { const p = JSON.parse(fs.readFileSync(PREFS_FILE, 'utf8')); if (!process.env.MODEL && p.model) llm.setModel(p.model); } catch { /* first run */ }
+if (llm.apiKey) llm.listModels().catch(() => {});
 // Which of the Claude account's connectors God switched on, remembered between runs.
 const CLI_FILE = path.join(DATA, 'cli.json');
 function saveCliPrefs() { try { fs.mkdirSync(DATA, { recursive: true }); fs.writeFileSync(CLI_FILE, JSON.stringify({ enabled: [...llm.cliEnabled], servers: llm.cliInfo.servers, scannedAt: llm.cliInfo.scannedAt, plugins: llm.cliInfo.plugins })); } catch { /* best effort */ } }
@@ -92,7 +97,7 @@ company.on('broadcast', broadcast);
 
 function settings() {
   const s = llm.status();
-  return { mode: s.mode, hasKey: s.hasKey, model: s.model, price: s.price, budgetCap: company.budgetCap, lastError: s.lastError, cli: s.cli, collab: company.collab, hiring: company.hiringMode, learning: company.kb.mode, webResearch: company.webResearch, skills: company.skillsStatus() };
+  return { mode: s.mode, hasKey: s.hasKey, model: s.model, price: s.price, models: s.models, modelsError: s.modelsError, budgetCap: company.budgetCap, lastError: s.lastError, cli: s.cli, collab: company.collab, hiring: company.hiringMode, learning: company.kb.mode, webResearch: company.webResearch, skills: company.skillsStatus() };
 }
 
 function initPayload() {
@@ -137,14 +142,15 @@ wss.on('connection', (ws) => {
         case 'chat': { company.godChat(m.agent, m.text).catch((e) => send(ws, { type: 'toast', text: `Chat failed: ${e.message}`, level: 'warn' })); break; }
         case 'pause': sim.paused = !!m.paused; break;
         case 'speed': sim.speed = Math.min(8, Math.max(0.25, Number(m.speed) || 1)); break;
-        case 'setKey': { if (typeof m.key === 'string' && m.key.trim()) llm.setKey(m.key); if (m.useLive && llm.apiKey) llm.setMode('live'); broadcast({ type: 'settings', settings: settings() }); break; }
+        case 'setKey': { if (typeof m.key === 'string' && m.key.trim()) { llm.setKey(m.key); llm.listModels({ force: true }).then(() => broadcast({ type: 'settings', settings: settings() })).catch(() => {}); } if (m.useLive && llm.apiKey) llm.setMode('live'); broadcast({ type: 'settings', settings: settings() }); break; }
         case 'setMode': if (m.mode === 'cli') await llm.cliCheck(); llm.setMode(m.mode); broadcast({ type: 'settings', settings: settings() }); if (m.mode !== 'mock') testConnection(ws); break;
         case 'testLlm': testConnection(ws); break;
         case 'cliScan': try { await llm.cliScan(); saveCliPrefs(); send(ws, { type: 'toast', text: `Found ${llm.cliInfo.servers.length} connector(s) on your Claude account.`, level: 'info' }); } catch (e) { send(ws, { type: 'toast', text: e.message, level: 'warn' }); } broadcast({ type: 'settings', settings: settings() }); break;
         case 'cliConnector': llm.setCliConnector(String(m.name), !!m.on); saveCliPrefs(); broadcast({ type: 'settings', settings: settings() }); break;
         case 'answerRequest': company.answerRequest(String(m.id), { text: String(m.text || ''), files: m.files, decline: !!m.decline }); break;
         case 'applyAnswers': company.applyAnswers(String(m.taskId)).then((r) => send(ws, { type: 'toast', text: `Applied ${r.applied} answer(s) to ${r.updated} deliverable(s).`, level: 'good' })).catch((e) => send(ws, { type: 'toast', text: e.message, level: 'warn' })); break;
-        case 'setModel': llm.setModel(String(m.model || '').slice(0, 80)); broadcast({ type: 'settings', settings: settings() }); break;
+        case 'setModel': llm.setModel(String(m.model || '').slice(0, 80)); savePrefs(); broadcast({ type: 'settings', settings: settings() }); if (llm.mode !== 'mock') testConnection(ws); break;
+        case 'listModels': await llm.listModels({ force: !!m.force }); send(ws, { type: 'settings', settings: settings() }); break;
         case 'setCollab': company.collab = ['full', 'lean', 'off'].includes(m.value) ? m.value : company.collab; broadcast({ type: 'settings', settings: settings() }); break;
         case 'setHiring': company.hiringMode = ['auto', 'ask', 'off'].includes(m.value) ? m.value : company.hiringMode; broadcast({ type: 'settings', settings: settings() }); break;
         case 'setLearning': company.kb.mode = ['active', 'passive', 'off'].includes(m.value) ? m.value : company.kb.mode; company.kb.touch(); broadcast({ type: 'settings', settings: settings() }); break;
