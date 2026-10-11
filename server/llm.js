@@ -139,7 +139,9 @@ export class LLM {
       const input = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0);
       inTotal += input; outTotal += u.output_tokens || 0;
       this.account(input, u.output_tokens || 0, u.cache_read_input_tokens || 0);
-      const content = json.content || [];
+      // Thinking blocks are signed against the exact request that produced them, and the API rejects them when sent back
+      // ("Invalid signature in thinking block"). We never switch thinking on, so the loop only needs the text and tool calls.
+      const content = (json.content || []).filter((c) => c.type !== 'thinking' && c.type !== 'redacted_thinking');
       const chunk = content.filter((c) => c.type === 'text').map((c) => c.text).join('\n');
       if (json.stop_reason === 'tool_use' && useTools) {
         messages.push({ role: 'assistant', content });

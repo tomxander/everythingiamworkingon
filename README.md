@@ -9,7 +9,7 @@
 ### A marketing agency run by AI agents, with a control room to match.
 
 ![Node](https://img.shields.io/badge/node-%E2%89%A5%2020-163144?style=flat-square&labelColor=1B405B)
-![Tests](https://img.shields.io/badge/tests-125%20passing-163144?style=flat-square&labelColor=1B405B)
+![Tests](https://img.shields.io/badge/tests-126%20passing-163144?style=flat-square&labelColor=1B405B)
 ![Dependencies](https://img.shields.io/badge/dependencies-1-163144?style=flat-square&labelColor=1B405B)
 ![Modes](https://img.shields.io/badge/modes-simulated%20%C2%B7%20API%20%C2%B7%20Claude%20account-163144?style=flat-square&labelColor=1B405B)
 
@@ -388,7 +388,7 @@ The server is authoritative. It streams state to the browser over WebSocket at 1
 npm test
 ```
 
-125 tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (private-address and redirect protection, untrusted-content fencing), searching beyond the client's site, site crawling, the org chart, kickoff, handoffs, alignment, escalation, outside-expert consults, hiring policy and approval, People & Talent (requisitions, the rating rule, reports, releases needing approval), upstream skill sync (hardened archive reading against the real repositories, validation, overlay, rollback, approval), the knowledge base and learning loop, the requests tracker, Claude account mode against a fake `claude` binary (sign-in, tool bridge, read-only connector rules, lookups), and the API-key path against scripted fakes of the Messages API: tool use, hiring mid-task, lessons, reflection, prompt-injection resistance, truncation recovery, revisions and timeouts, and planning that falls back visibly instead of hanging.
+126 tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (private-address and redirect protection, untrusted-content fencing), searching beyond the client's site, site crawling, the org chart, kickoff, handoffs, alignment, escalation, outside-expert consults, hiring policy and approval, People & Talent (requisitions, the rating rule, reports, releases needing approval), upstream skill sync (hardened archive reading against the real repositories, validation, overlay, rollback, approval), the knowledge base and learning loop, the requests tracker, Claude account mode against a fake `claude` binary (sign-in, tool bridge, read-only connector rules, lookups), and the API-key path against scripted fakes of the Messages API: tool use, hiring mid-task, lessons, reflection, prompt-injection resistance, truncation recovery, revisions and timeouts, planning that falls back visibly instead of hanging, and signed thinking blocks in tool loops.
 
 </details>
 
