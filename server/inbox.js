@@ -2,6 +2,7 @@
 // Requests never block the work. The agent carries on with labelled assumptions; when God answers, the answer
 // reaches every later workstream, and "apply answers" sends the affected deliverables back for a revision.
 import { DATA_NEEDS } from './mock.js';
+import { extractJson } from './llm.js';
 
 const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 const KINDS = ['question', 'document', 'data', 'access'];
@@ -42,6 +43,28 @@ export const inbox = {
     this.toast(`${agent.short} needs something from you: ${clip(what, 70)}`, 'warn');
     this.tryResolve?.(req).catch(() => {}); // when a Claude account with connectors is attached, try to fetch it from there first
     return { req };
+  },
+
+  /**
+   * With a Claude account attached and connectors switched on, look for the thing in the connected tools first
+   * (documents, notes, CRM, analytics). Read-only. If it is found the request is answered, marked with where it came from.
+   */
+  async tryResolve(req) {
+    if (!this.llm.cliConnectorsOn() || req.status !== 'open') return false;
+    const task = this.tasks.get(req.taskId); this.addLog(`Looking in connected tools for: ${clip(req.what, 80)}`, { type: 'system', agent: req.by, taskId: req.taskId });
+    let res;
+    try {
+      res = await this.llm.complete({ kind: 'resolve', maxTokens: 1500, tools: [], onTool: async () => '', maxTurns: 4,
+        system: `You are a research assistant at 4EVR with read-only access to the founder's connected tools (notes, documents, CRM, analytics, files) and web search. Find the specific item requested. Quote the data or document text itself, not a description of it. Reply with JSON only: {"found":true or false,"answer":"the content, at most 4000 characters","source":"which connected tool and item it came from"}. If you cannot find it, say found=false. Never guess and never invent.`,
+        user: `Request: ${req.what}\nWhy it is needed: ${req.why}\nTask: ${task?.title || ''}\nBrief: ${task?.brief || ''}` });
+    } catch (e) { this.addLog(`Connected-tools lookup failed: ${e.message}`, { type: 'system', agent: req.by }); return false; }
+    if (task) this.account(task, res);
+    const j = extractJson(res.text);
+    if (req.status !== 'open' || !j?.found || String(j.answer || '').trim().length < 20) return false;
+    req.status = 'answered'; req.answer = { text: clip(String(j.answer), MAX_ANSWER), files: [], by: `connector: ${clip(String(j.source || 'connected tools'), 60)}`, at: Date.now() }; req.auto = true;
+    this.talk(task || null, { from: req.by, to: 'all', kind: 'decision', text: `Found what I asked for in ${req.answer.by.replace('connector: ', '')}: ${clip(req.what, 80)}. You can overrule it in the tracker.` });
+    this.emit('broadcast', { type: 'request', request: req }); this.save();
+    return true;
   },
 
   /** Tool for live agents. */

@@ -10,7 +10,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const st = {
   init: null, agents: {}, order: [], tasks: new Map(), deliv: new Map(), comms: [], log: [], stats: null, settings: null,
   snap: null, live: {}, selected: null, tab: 'tasks', openTasks: new Set(), commsFilter: 'all', commsTask: 'all', unreadOutput: 0, fxSeen: new Set(),
-  kb: null, hiring: null, hr: null, brainFilter: 'all', brainQuery: '', pendingHires: [],
+  kb: null, hiring: null, hr: null, requests: [], rqFiles: {}, brainFilter: 'all', brainQuery: '', pendingHires: [],
 };
 let ws, renderer, reconnectDelay = 500;
 
@@ -39,6 +39,8 @@ function handle(m) {
     case 'kb': st.kb = m.kb; if (st.tab === 'brain') renderBrain(); updateBadges(); break;
     case 'agent_added': { const a = m.agent; st.agents[a.id] = a; if (!st.order.includes(a.id)) st.order.push(a.id); renderer?.addAgent(a); st.hiring = m.hiring; if (st.tab === 'team') renderTeam(); break; }
     case 'agent_removed': { delete st.agents[m.id]; st.order = st.order.filter((x) => x !== m.id); delete st.live[m.id]; renderer?.removeAgent(m.id); st.hiring = m.hiring; if (st.selected === m.id) st.selected = null; if (st.tab === 'team') renderTeam(); break; }
+    case 'request': { const i = st.requests.findIndex((r) => r.id === m.request.id); if (i >= 0) st.requests[i] = m.request; else st.requests.unshift(m.request); updateBadges(); if (st.tab === 'inbox' && document.activeElement?.tagName !== 'TEXTAREA') renderInbox(); break; }
+    case 'requests': st.requests = m.requests; updateBadges(); if (st.tab === 'inbox') renderInbox(); break;
     case 'hr': st.hr = m.hr; if (st.tab === 'team') renderTeam(); break;
     case 'hire_request': st.pendingHires.push(m.req); if (st.tab === 'team') renderTeam(); break;
     case 'hire_resolved': st.pendingHires = st.pendingHires.filter((x) => x.id !== m.id); if (st.tab === 'team') renderTeam(); break;
@@ -52,7 +54,7 @@ function handle(m) {
 function onInit(m) {
   st.init = m; st.agents = Object.fromEntries(m.agents.map((a) => [a.id, a])); st.order = m.agents.map((a) => a.id);
   st.tasks = new Map(m.tasks.map((t) => [t.id, t])); st.deliv = new Map(m.deliverables.map((d) => [d.id, d]));
-  st.comms = m.comms; st.log = m.log; st.stats = m.stats; st.settings = m.settings; st.snap = m.snapshot; st.kb = m.kb; st.hiring = m.hiring; st.hr = m.hr; st.pendingHires = m.hiring?.pending || [];
+  st.comms = m.comms; st.log = m.log; st.stats = m.stats; st.settings = m.settings; st.snap = m.snapshot; st.kb = m.kb; st.hiring = m.hiring; st.hr = m.hr; st.requests = m.requests || []; st.pendingHires = m.hiring?.pending || [];
   for (const a of m.snapshot.agents) st.live[a.id] = a;
   $('#tagline').textContent = `· ${m.company.tagline}`;
   if (!renderer) {
@@ -147,9 +149,9 @@ function updateClock() {
 }
 function updateTop() {
   const s = st.settings, stt = st.stats; if (!s) return;
-  const live = s.mode === 'live';
+  const live = s.mode === 'live' || s.mode === 'cli';
   $('#mode-chip').classList.toggle('live', live);
-  $('#mode-label').textContent = live ? `LIVE · ${s.model}` : 'SIMULATED';
+  $('#mode-label').textContent = s.mode === 'cli' ? `CLAUDE ACCOUNT · ${s.model}` : live ? `LIVE · ${s.model}` : 'SIMULATED';
   const t = stt?.llm?.totals;
   if (t) { $('#tok').textContent = fmtNum(t.inputTokens + t.outputTokens); $('#cost').textContent = (t.simulated ? '~' : '') + fmtMoney(t.cost); }
   $('#cap').textContent = `$${s.budgetCap}`;
@@ -166,6 +168,7 @@ function updateBadges() {
   const active = [...st.tasks.values()].filter((t) => ['queued', 'planning', 'active', 'review'].includes(t.status)).length;
   $('#n-tasks').textContent = active || '';
   $('#n-output').textContent = st.unreadOutput || '';
+  $('#n-inbox').textContent = st.requests.filter((r) => r.status === 'open').length || '';
 }
 
 // ------------------------------------------------------------ tabs
@@ -193,7 +196,7 @@ function setTab(tab) {
   $$('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab)); moveTabIndicator();
   $$('.panel').forEach((p) => p.classList.toggle('on', p.id === `p-${tab}`));
   if (tab === 'output') { st.unreadOutput = 0; updateBadges(); }
-  if (tab === 'team') renderTeam(); if (tab === 'brain') renderBrain(); if (tab === 'metrics') renderMetrics(); if (tab === 'log') renderLog(); if (tab === 'comms') { renderComms(); }
+  if (tab === 'inbox') renderInbox(); if (tab === 'team') renderTeam(); if (tab === 'brain') renderBrain(); if (tab === 'metrics') renderMetrics(); if (tab === 'log') renderLog(); if (tab === 'comms') { renderComms(); }
   if (changed && (tab === 'metrics' || tab === 'brain')) countUp($(`#p-${tab}`));
 }
 
@@ -306,6 +309,35 @@ function appendComms(m) {
   if (atBottom) p.scrollTop = p.scrollHeight;
 }
 
+// ------------------------------------------------------------ inbox: what the agents need from God
+function renderInbox() {
+  const p = $('#p-inbox'); const all = st.requests; const open = all.filter((r) => r.status === 'open'); const done = all.filter((r) => r.status !== 'open');
+  if (!all.length) { p.innerHTML = '<div class="empty"><div class="big">📥</div>Nothing needed yet. When an agent cannot find a document, a data export or an answer itself, it asks here, and carries on with assumptions meanwhile.</div>'; return; }
+  const kind = (k) => `<span class="pill kind-${k}">${esc(k)}</span>`;
+  const card = (r) => {
+    const a = st.agents[r.by]; const ans = r.answer;
+    const head = `<div class="rq-head">${avatar(r.by)}<b>${esc(a?.short || r.by)}</b>${kind(r.kind)}${r.taskId ? `<span class="pill">${esc(r.taskId)}</span>` : ''}${r.auto ? `<span class="pill auto">found in connected tools</span>` : ''}<span class="muted" style="margin-left:auto;font-size:11px">${esc(r.id)}</span></div>`;
+    const body = `<div class="rq-what">${esc(r.what)}</div>${r.why ? `<div class="rq-why">${esc(r.why)}</div>` : ''}${r.tried ? `<div class="rq-tried">Already tried: ${esc(r.tried)}</div>` : ''}`;
+    if (r.status !== 'open') return `<div class="card req ${r.status}">${head}${body}<div class="rq-ans">${r.status === 'declined' ? 'You said you cannot provide this.' : `${esc(ans.by !== 'god' ? `From ${ans.by.replace('connector: ', '')}:\n` : '')}${esc(ans.text.slice(0, 600))}${ans.text.length > 600 ? '…' : ''}`}</div>${ans?.files?.length ? `<div class="rq-files">Attached: ${ans.files.map((f) => esc(f.name)).join(', ')}</div>` : ''}</div>`;
+    const files = (st.rqFiles[r.id] || []).map((f) => esc(f.name)).join(', ');
+    return `<div class="card req">${head}${body}<textarea data-rq-text="${r.id}" placeholder="Type the answer, or paste the data here…"></textarea><div class="rq-actions"><button class="btn primary sm" data-rq-send="${r.id}">Send answer</button><label class="btn sm" style="cursor:pointer">Attach files<input type="file" multiple hidden data-rq-file="${r.id}" accept=".txt,.md,.csv,.tsv,.json,.html,.xml,.log,text/*"></label><button class="btn sm" data-rq-no="${r.id}">Can't provide</button><span class="rq-files" data-rq-files="${r.id}">${files}</span></div></div>`;
+  };
+  // tasks with answers that have not been applied yet
+  const apply = [...new Set(all.filter((r) => r.status === 'answered' && !r.appliedAt && r.taskId).map((r) => r.taskId))].map((id) => {
+    const n = all.filter((r) => r.taskId === id && r.status === 'answered' && !r.appliedAt).length; const t = st.tasks.get(id);
+    return t && ['done', 'failed'].includes(t.status) ? `<div class="apply-bar"><span>${esc(id)}: ${n} answer${n > 1 ? 's' : ''} not applied yet</span><button class="btn primary sm" data-rq-apply="${id}">Apply answers</button></div>` : '';
+  }).join('');
+  p.innerHTML = `${apply}${open.length ? `<h3 class="sect">Needs you (${open.length})</h3>${open.map(card).join('')}` : '<div class="empty" style="padding:18px"><div class="big">✅</div>Nothing is waiting on you.</div>'}${done.length ? `<h3 class="sect">Answered</h3>${done.slice(0, 30).map(card).join('')}` : ''}`;
+  $$('[data-rq-send]', p).forEach((b) => (b.onclick = () => { const id = b.dataset.rqSend; send({ type: 'answerRequest', id, text: $(`[data-rq-text="${id}"]`, p).value, files: st.rqFiles[id] || [] }); delete st.rqFiles[id]; }));
+  $$('[data-rq-no]', p).forEach((b) => (b.onclick = () => send({ type: 'answerRequest', id: b.dataset.rqNo, decline: true })));
+  $$('[data-rq-apply]', p).forEach((b) => (b.onclick = () => { b.disabled = true; b.textContent = 'Applying…'; send({ type: 'applyAnswers', taskId: b.dataset.rqApply }); }));
+  $$('[data-rq-file]', p).forEach((inp) => (inp.onchange = async () => {
+    const id = inp.dataset.rqFile; const out = [];
+    for (const f of [...inp.files].slice(0, 5)) { if (f.size > 400000) { toast(`${f.name} is over 400 KB. Paste the relevant part instead.`, 'warn'); continue; } out.push({ name: f.name, text: await f.text() }); }
+    st.rqFiles[id] = out; $(`[data-rq-files="${id}"]`, p).textContent = out.map((f) => f.name).join(', ');
+  }));
+}
+
 // ------------------------------------------------------------ team panel
 function hrPanel() {
   const h = st.hr; if (!h) return '';
@@ -412,7 +444,7 @@ function renderOutput() {
 // ------------------------------------------------------------ metrics panel
 function renderMetrics() {
   const p = $('#p-metrics'); const s = st.stats; if (!s) return;
-  const t = s.llm.totals; const live = s.llm.mode === 'live';
+  const t = s.llm.totals; const live = s.llm.mode !== 'mock';
   const tile = (k, v, sub = '') => `<div class="tile"><div class="k">${k}</div><div class="v">${v}${sub ? ` <small>${sub}</small>` : ''}</div></div>`;
   const hist = s.history || [];
   const depts = Object.values(s.depts);
@@ -510,7 +542,7 @@ function refreshSettings() { if (!$('#modal').hidden && $('#modal-card').dataset
 function openSettings() {
   const s = st.settings; if (!s) return;
   openModal(`<button class="btn close">✕</button><h2>Settings</h2><div class="muted">How the agents think.</div>
-    <div class="notice ${s.mode === 'live' ? '' : 'warn'}">${s.mode === 'live' ? `<b>Live.</b> Real Claude (${esc(s.model)}) is running the agents. Spend is capped at $${s.budgetCap}; when the cap is hit the office drops back to simulation.` : `<b>Simulated.</b> The office runs on a built-in simulator so you can see everything work without an API key. Deliverables are stamped SIMULATED. Add a key to make the agents really think.`}</div>
+    ${modeNotice(s)}
     <label class="field-label">Anthropic API key ${s.hasKey ? '<span style="color:var(--green)">· set (held in server memory only)</span>' : ''}</label>
     <div class="row"><input class="field" style="flex:1" id="s-key" type="password" placeholder="${s.hasKey ? '•••••••• (leave blank to keep)' : 'sk-ant-…'}" autocomplete="off" /><button class="btn primary" id="s-save">${s.hasKey ? 'Update & go live' : 'Save & go live'}</button></div>
     <label class="field-label">Model</label><div class="row"><input class="field" style="flex:1" id="s-model" value="${esc(s.model)}" /><button class="btn" id="s-model-save">Set</button></div>
@@ -519,7 +551,8 @@ function openSettings() {
     <label class="field-label">Hiring</label><div class="row">${['auto', 'ask', 'off'].map((m) => `<button class="btn ${s.hiring === m ? 'primary' : ''}" data-hiring="${m}">${m}</button>`).join('')}</div><div class="muted" style="font-size:11.5px;margin-top:4px">auto: the CMO and agents hire within the caps. ask: you approve each hire. off: no hiring.</div>
     <label class="field-label">Learning</label><div class="row">${['active', 'passive', 'off'].map((m) => `<button class="btn ${s.learning === m ? 'primary' : ''}" data-learning="${m}">${m}</button>`).join('')}</div><div class="muted" style="font-size:11.5px;margin-top:4px">active: also studies the web in idle time. passive: reviews and retrospectives only. off: nothing recorded.</div>
     ${skillsBlock(s)}
-    <label class="field-label">Mode</label><div class="row"><button class="btn ${s.mode === 'mock' ? 'primary' : ''}" id="s-mock">Simulated</button><button class="btn ${s.mode === 'live' ? 'primary' : ''}" id="s-live" ${s.hasKey ? '' : 'disabled'}>Live</button></div>
+    <label class="field-label">Mode</label><div class="modes"><button class="btn ${s.mode === 'mock' ? 'primary' : ''}" id="s-mock">Simulated</button><button class="btn ${s.mode === 'live' ? 'primary' : ''}" id="s-live" ${s.hasKey ? '' : 'disabled'}>API key</button><button class="btn ${s.mode === 'cli' ? 'primary' : ''}" id="s-cli" ${s.cli?.available || !s.cli?.checked ? '' : 'disabled'}>Claude account</button></div>
+    ${connectorsBlock(s)}
     ${s.lastError ? `<div class="notice warn">Last API error: ${esc(s.lastError)}</div>` : ''}
     <div class="notice" style="margin-top:16px">Prices used for cost estimates: $${s.price.in}/M input, $${s.price.out}/M output tokens (override with the <code>PRICE_IN</code> / <code>PRICE_OUT</code> env vars). Your key is never written to disk; you can also set <code>ANTHROPIC_API_KEY</code> before starting the server.</div>`, 'settings');
   $('#s-save').onclick = () => { const key = $('#s-key').value.trim(); if (!key && !s.hasKey) return; send({ type: 'setKey', key: key || undefined, useLive: true }); if (!key) send({ type: 'setMode', mode: 'live' }); };
@@ -527,7 +560,24 @@ function openSettings() {
   $('#s-budget-save').onclick = () => send({ type: 'setBudget', value: $('#s-budget').value });
   $$('[data-skmode]', card).forEach((b) => (b.onclick = () => send({ type: 'setSkillsMode', value: b.dataset.skmode }))); $$('[data-sk-check]', card).forEach((b) => (b.onclick = () => { b.textContent = 'Checking…'; send({ type: 'skillsCheck', id: b.dataset.skCheck }); })); $$('[data-sk-rollback]', card).forEach((b) => (b.onclick = () => { if (confirm('Roll this skills library back to the previous version?')) send({ type: 'skillsRollback', id: b.dataset.skRollback }); })); $$('[data-sk-approve]', card).forEach((b) => (b.onclick = () => send({ type: 'skillsApprove', id: b.dataset.skApprove }))); $$('[data-sk-decline]', card).forEach((b) => (b.onclick = () => send({ type: 'skillsDecline', id: b.dataset.skDecline })));
   $$('[data-collab]', card).forEach((b) => (b.onclick = () => send({ type: 'setCollab', value: b.dataset.collab }))); $$('[data-hiring]', card).forEach((b) => (b.onclick = () => send({ type: 'setHiring', value: b.dataset.hiring }))); $$('[data-learning]', card).forEach((b) => (b.onclick = () => send({ type: 'setLearning', value: b.dataset.learning })));
-  $('#s-mock').onclick = () => send({ type: 'setMode', mode: 'mock' }); $('#s-live').onclick = () => send({ type: 'setMode', mode: 'live' });
+  $('#s-mock').onclick = () => send({ type: 'setMode', mode: 'mock' }); $('#s-live').onclick = () => send({ type: 'setMode', mode: 'live' }); $('#s-cli').onclick = () => send({ type: 'setMode', mode: 'cli' });
+  const scan = $('#cli-scan'); if (scan) scan.onclick = () => { scan.textContent = 'Scanning…'; scan.disabled = true; send({ type: 'cliScan' }); };
+  $$('[data-conn]', card).forEach((b) => (b.onclick = () => send({ type: 'cliConnector', name: b.dataset.conn, on: b.dataset.on === '1' })));
+}
+
+function modeNotice(s) {
+  if (s.mode === 'cli') return `<div class="notice"><b>Claude account.</b> The agents run through your signed-in Claude CLI${s.cli?.version ? ` (${esc(s.cli.version)})` : ''}: your account's web search and the connectors you switch on below. No API key is used. Spend is capped at $${s.budgetCap} (estimated).</div>`;
+  if (s.mode === 'live') return `<div class="notice"><b>API key.</b> Real Claude (${esc(s.model)}) is running the agents with your key. Agents can search the web and read pages, but cannot use your Claude account's connectors in this mode. Spend is capped at $${s.budgetCap}.</div>`;
+  return `<div class="notice warn"><b>Simulated.</b> The office runs on a built-in simulator so you can see everything work without a key. Deliverables are stamped SIMULATED. Use an API key or your Claude account to make the agents really think.</div>`;
+}
+function connectorsBlock(s) {
+  const c = s.cli; if (!c) return '';
+  if (!c.available) return `<div class="notice" style="margin-top:10px"><b>Claude account.</b> ${c.checked ? esc(c.error || 'The Claude CLI is not available.') : 'Checking for the Claude CLI…'} Install Claude Code, sign in with your account, then reopen Settings.</div>`;
+  const rows = c.servers.map((v) => `<div class="conn"><div><b>${esc(v.name)}</b><small>${v.readOnlyTools.length} read-only tool${v.readOnlyTools.length === 1 ? '' : 's'} usable${v.blockedTools ? ` · ${v.blockedTools} blocked (can write or act)` : ''}</small></div>${v.readOnlyTools.length ? `<button class="btn sm ${v.enabled ? 'primary' : ''}" data-conn="${esc(v.name)}" data-on="${v.enabled ? 0 : 1}">${v.enabled ? 'On' : 'Off'}</button>` : '<span class="muted" style="font-size:11px">cannot enable</span>'}</div>`).join('');
+  return `<label class="field-label">Connectors on your Claude account <span class="muted">· off until you switch them on</span></label>
+    <div class="muted" style="font-size:11.5px;margin-bottom:4px">When on, agents may <b>read</b> from a connector (for example your notes or documents) to find what they need before asking you. Tools that send, create, change, delete or spend are always blocked. Connector content is treated as untrusted data.</div>
+    ${rows || '<div class="notice">No connectors found yet. Scan to look.</div>'}
+    <div class="row" style="margin-top:8px"><button class="btn sm" id="cli-scan">Scan connectors</button><span class="muted" style="font-size:11px">${c.scannedAt ? `Last scanned ${esc(new Date(c.scannedAt).toLocaleString())}` : 'Not scanned yet'}${c.plugins?.length ? ` · plugins: ${esc(c.plugins.join(', '))}` : ''}</span></div>`;
 }
 
 function skillsBlock(s) {

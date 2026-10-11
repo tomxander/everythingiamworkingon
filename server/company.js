@@ -80,7 +80,7 @@ export class Company extends EventEmitter {
   async sleepSim(sec, tok) { return this.sim.sleep(sec, tok); }
 
   guardBudget() {
-    if (this.llm.mode === 'live' && this.llm.totals.cost >= this.budgetCap) {
+    if (this.llm.mode !== 'mock' && this.llm.totals.cost >= this.budgetCap) {
       this.llm.setMode('mock');
       this.toast(`Budget cap of $${this.budgetCap.toFixed(2)} reached. Switched to simulation mode.`, 'warn');
       this.addLog(`Budget cap $${this.budgetCap.toFixed(2)} reached; switched to simulated mode.`, { type: 'system' });

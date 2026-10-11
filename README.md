@@ -53,6 +53,7 @@ The key can also be entered in the Settings panel. It is held in server memory o
 - [How work flows](#how-work-flows)
 - [Teamwork](#teamwork)
 - [Internet access](#internet-access)
+- [Asking for what is missing](#asking-for-what-is-missing)
 - [Hiring](#hiring)
 - [People & Talent](#people--talent)
 - [Learning](#learning)
@@ -111,7 +112,7 @@ A light, frosted-glass control room: the office on the left, the operating panel
 10. **Retrospective.** The CMO leads a retro: what went well, what did not, what changes. Lessons and, rarely, company operating principles are recorded.
 11. **Persist.** State, deliverables, client profiles, hires and knowledge are saved to `data/` and `deliverables/`.
 
-Agents work asynchronously and do not ask clarifying questions. They state assumptions, and the open questions are surfaced to you on the task. Treat deliverables as drafts for human review.
+Agents never stop and wait. They state assumptions and carry on, and anything they truly need from you goes to the [Inbox](#asking-for-what-is-missing). Treat deliverables as drafts for human review.
 
 ## Teamwork
 
@@ -132,6 +133,17 @@ Every agent has two tools in live mode: `web_search` and `fetch_url`, on every k
 - Search is keyless (DuckDuckGo's HTML endpoint, with Bing as a fallback), cached for ten minutes and rate-limited. These engines can block automated requests. When that happens the agent is told the search failed and must label the claim unverified.
 - Simulated mode performs real searches too and lists the sources in the deliverable. Set `WEB_RESEARCH=off` to disable that.
 - **Web content is untrusted.** It is wrapped in `<untrusted_web_content>` markers with a standing instruction never to follow instructions inside it. Agents have no write tools on the web: only `GET` requests, and private, loopback and link-local addresses are blocked at connection time.
+
+## Asking for what is missing
+
+Agents find things themselves first, then ask. The order is: the client's site, the wider internet, connected tools (if you have attached a Claude account), and only then you.
+
+- **Search beyond the site.** `web_search` takes a source: `web` (general), `news`, `wiki`, `reddit` or `hn` (Hacker News). Before the profile is written, the research lead also searches the web for news, reviews, competitors, background and forum talk about the company, and the results go into the profile under "Outside the site". Snippets are treated as leads to check, not facts.
+- **The Inbox.** When something that matters is still missing, an agent calls `request_info` with what it needs, why, and what it already tried. Requests are a question, a document, a data export or access. They show in the Inbox tab with the agent, the task and what was tried. You type an answer, attach text files (CSV, Markdown, JSON, and so on), or say you cannot provide it.
+- **Nothing blocks.** The agent carries on with a labelled assumption. Your answer reaches every workstream that starts afterwards. For work already finished, **Apply answers** sends the deliverables that asked back for an update.
+- **Not for what a search would find.** The tool refuses a request that does not say what was searched first, merges duplicates, and caps requests at three per agent and eight per task. Intake's open questions and anything the outside research could not find are tracked the same way.
+- **Pulled from connected tools.** With [Claude account mode](#execution-modes) and a connector switched on, a new request is first looked up in your connected tools (notes, documents, CRM, analytics). If it is found, the request is answered automatically and marked with its source; you can overrule it.
+- Simulated mode raises the requests each playbook would really want (for example an analytics export for the analytics playbook, a Search Console export for the SEO audit) unless the brief already supplies it.
 
 ## Hiring
 
@@ -200,7 +212,17 @@ Agents get better with use. Knowledge is stored in `data/knowledge.json` and can
 | Behaviour | A built-in simulator selects specialists by keyword playbook and produces deliverables structured from the real skill outlines. Output is clearly marked SIMULATED. | Real model calls with the full skill text, prompt caching on the skill block, and retries with backoff on 429 and 5xx responses. |
 | Cost | None. Token and cost figures are estimates of what live calls would use. | Metered. A configurable budget cap (default $5) reverts the platform to simulated mode when reached. |
 
-Live mode has been verified against a local fake of the Messages API (request format, skill injection, caching marker, plan repair, retries, budget cap) but not against the production API in this repository's test suite. If a live call fails, the last API error is shown in Settings.
+### Claude account mode
+
+A third mode runs the agents through the `claude` command-line tool using the account it is signed in to, with no API key.
+
+- **What it adds.** Your account's own web search, and any connectors (MCP servers) on the account. Our tools (`fetch_url`, `ask_teammate`, `request_info`, hiring, lessons) are offered to the CLI through a small local MCP server on `127.0.0.1`, so an agent behaves the same in every mode. The API key, if set, is not passed to the CLI.
+- **Setup.** Install [Claude Code](https://claude.com/claude-code), run `claude` once and sign in, then choose **Claude account** in Settings (or start with `CLAUDE_ACCOUNT=on`).
+- **Connectors.** Settings has a **Scan connectors** button that lists what the account has. All connectors start **off**. Switching one on lets agents *read* from it. Only tools that look read-only (search, get, list, fetch, query and similar) are ever allowed. Anything that could send, create, update, delete, run an action or spend credits is blocked by name, and a connector with no read-only tools cannot be enabled. Connector content is treated as untrusted data.
+- **What it cannot do.** It cannot read your claude.ai Projects or chat history: there is no supported way for a local program to do that. Put what an agent needs in a connected tool (notes, documents), or paste or attach it in the Inbox.
+- **Cost and speed.** Each agent call starts a `claude` process, so calls are slower than the API and run a few at a time (`CLI_CONCURRENCY`, default 3). Usage counts against your account's limits. Estimated spend still applies against the budget cap.
+
+Live (API key) mode has been verified against a local fake of the Messages API (request format, skill injection, caching marker, plan repair, retries, budget cap) but not against the production API in this repository's test suite. If a live call fails, the last API error is shown in Settings.
 
 ## Configuration
 
@@ -219,7 +241,10 @@ Live mode has been verified against a local fake of the Messages API (request fo
 | `HIRING`, `HIRE_MAX_HEADCOUNT`, `HIRE_LIMIT`, `HIRE_PER_TASK` | `auto`, `24`, `12`, `3` | Hiring mode and caps. |
 | `LEARNING`, `STUDY_PER_DAY`, `CONSOLIDATE_AT` | `active`, `8`, `5` | Learning mode, study sessions per simulated day, lessons needed to form a playbook. |
 | `WEB_RESEARCH` | on | Set to `off` to stop simulated agents running real web searches. |
-| `SEARCH_ENDPOINT` | DuckDuckGo, Bing | Override the search endpoint (`{q}` is replaced). Used by tests. |
+| `SEARCH_ENDPOINT` | DuckDuckGo, Bing | Override the web search endpoint (`{q}` is replaced). Used by tests. |
+| `SEARCH_NEWS_ENDPOINT`, `SEARCH_WIKI_ENDPOINT`, `SEARCH_REDDIT_ENDPOINT`, `SEARCH_HN_ENDPOINT` | Google News RSS, Wikipedia, Reddit, Hacker News | Override the outside search sources. Used by tests. |
+| `CLAUDE_ACCOUNT` | off | Set to `on` to start in Claude account mode when the `claude` CLI is available. |
+| `CLAUDE_BIN`, `CLI_CONCURRENCY` | `claude`, `3` | Path to the CLI and how many agent calls may run at once in Claude account mode. |
 | `PORT`, `HOST` | `4747`, `127.0.0.1` | Server binding. See [Security](#security). |
 | `ALLOW_PRIVATE_FETCH` | unset | Set to `1` only for testing against a local site. Disables the private-address block on page reading. |
 | `DATA_DIR`, `DELIVERABLES_DIR` | `./data`, `./deliverables` | Persistence locations. |
@@ -254,6 +279,8 @@ server/
   index.js     HTTP and WebSocket server, scheduling loops, static files
   company.js   Task pipeline, planner, consults, reviews, synthesis, metrics, persistence
   collab.js    Org structure, kickoff, task channel, handoffs, alignment, escalation, agent toolbox
+  inbox.js     The requests tracker: questions, documents and data agents ask God for
+  claude-cli.js Claude account mode: the CLI runner, the local MCP bridge, read-only connector rules
   hr.js        People & Talent: requisitions, reviews, workforce reports, release proposals
   hiring.js    Hiring policy, building specialists from library skills, onboarding, approval, letting people go
   skillsync.js Keeps the skills library current with its upstream GitHub repo: fetch, validate, overlay, rollback
@@ -296,7 +323,7 @@ The server is authoritative. It streams state to the browser over WebSocket at 1
 npm test
 ```
 
-One hundred and two tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (including private-address and redirect protection and untrusted-content fencing), site crawling, the org chart, kickoff, handoffs, alignment, escalation and recovery, hiring policy and approval, the knowledge base (safety filter, retrieval, promotion and retirement, consolidation, learning about learning), the learning loop, reuse of hired specialists, upstream skill sync (hardened archive reading, validation, overlay, rollback, approval) and hiring from newly added playbooks, People & Talent (requisitions, rating rule, reports, releases needing approval), the real hr-skills archive, outside-expert consults, work-aware chat, lean versus full conversation cost, and the live path against scripted fakes of the Messages API: tool use, asking teammates, hiring mid-task, saving lessons, reflection, retrospectives, study, prompt-injection resistance, truncation recovery, revisions and timeouts.
+One hundred and twenty tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (including private-address and redirect protection and untrusted-content fencing), site crawling, the org chart, kickoff, handoffs, alignment, escalation and recovery, hiring policy and approval, the knowledge base (safety filter, retrieval, promotion and retirement, consolidation, learning about learning), the learning loop, reuse of hired specialists, upstream skill sync (hardened archive reading, validation, overlay, rollback, approval) and hiring from newly added playbooks, People & Talent (requisitions, rating rule, reports, releases needing approval), the real hr-skills archive, outside-expert consults, search beyond the client site, the requests tracker, Claude account mode against a fake `claude` binary (login, tool bridge, read-only connector rules, lookups), work-aware chat, lean versus full conversation cost, and the live path against scripted fakes of the Messages API: tool use, asking teammates, hiring mid-task, saving lessons, reflection, retrospectives, study, prompt-injection resistance, truncation recovery, revisions and timeouts.
 
 ## Licence and credits
 

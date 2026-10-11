@@ -34,6 +34,11 @@ const llm = new LLM();
 const sim = new Sim(map, AGENTS);
 const company = new Company({ sim, llm, skills, dataDir: DATA, deliverablesDir: DELIV });
 const life = new Life(sim, company);
+// Which of the Claude account's connectors God switched on, remembered between runs.
+const CLI_FILE = path.join(DATA, 'cli.json');
+function saveCliPrefs() { try { fs.mkdirSync(DATA, { recursive: true }); fs.writeFileSync(CLI_FILE, JSON.stringify({ enabled: [...llm.cliEnabled], servers: llm.cliInfo.servers, scannedAt: llm.cliInfo.scannedAt, plugins: llm.cliInfo.plugins })); } catch { /* best effort */ } }
+try { const p = JSON.parse(fs.readFileSync(CLI_FILE, 'utf8')); llm.cliInfo.servers = p.servers || []; llm.cliInfo.scannedAt = p.scannedAt || null; llm.cliInfo.plugins = p.plugins || []; llm.cliEnabled = new Set((p.enabled || []).filter((n) => llm.cliInfo.servers.some((s) => s.name === n))); } catch { /* first run */ }
+llm.cliCheck().then(() => { if (process.env.CLAUDE_ACCOUNT === 'on' && llm.cliInfo.ok) llm.setMode('cli'); }).catch(() => {});
 company.life = life;
 company.skillIndexFn = () => skillIndex(skills);
 for (const ss of skillSyncs) company.attachSkillSync(ss);
@@ -87,7 +92,7 @@ company.on('broadcast', broadcast);
 
 function settings() {
   const s = llm.status();
-  return { mode: s.mode, hasKey: s.hasKey, model: s.model, price: s.price, budgetCap: company.budgetCap, lastError: s.lastError, collab: company.collab, hiring: company.hiringMode, learning: company.kb.mode, webResearch: company.webResearch, skills: company.skillsStatus() };
+  return { mode: s.mode, hasKey: s.hasKey, model: s.model, price: s.price, budgetCap: company.budgetCap, lastError: s.lastError, cli: s.cli, collab: company.collab, hiring: company.hiringMode, learning: company.kb.mode, webResearch: company.webResearch, skills: company.skillsStatus() };
 }
 
 function initPayload() {
@@ -97,7 +102,7 @@ function initPayload() {
     map: { TILE, W: map.W, H: map.H, rooms: map.rooms, floor: map.floor, wall: map.wall, furniture: map.furniture, spots: map.spots },
     agents: [...sim.agents.values()].map((a) => company.publicAgent(a)),
     kb: { summary: company.kb.summary(), lessons: company.kb.view(250), playbooks: company.kb.playbooks, notes: company.kb.notes.slice(0, 30), events: company.kb.events.slice(-20) },
-    hiring: company.hiringStatus(), hr: company.hrPublic(),
+    hiring: company.hiringStatus(), hr: company.hrPublic(), requests: company.requestsPublic(),
     depts: DEPT_META,
     skills: skillIndex(skills), skillsSource: company.skillsStatus(),
     tasks: [...company.tasks.values()].map((t) => company.publicTask(t)),
@@ -124,7 +129,11 @@ wss.on('connection', (ws) => {
         case 'pause': sim.paused = !!m.paused; break;
         case 'speed': sim.speed = Math.min(8, Math.max(0.25, Number(m.speed) || 1)); break;
         case 'setKey': { if (typeof m.key === 'string' && m.key.trim()) llm.setKey(m.key); if (m.useLive && llm.apiKey) llm.setMode('live'); broadcast({ type: 'settings', settings: settings() }); break; }
-        case 'setMode': llm.setMode(m.mode); broadcast({ type: 'settings', settings: settings() }); break;
+        case 'setMode': if (m.mode === 'cli') await llm.cliCheck(); llm.setMode(m.mode); broadcast({ type: 'settings', settings: settings() }); break;
+        case 'cliScan': try { await llm.cliScan(); saveCliPrefs(); send(ws, { type: 'toast', text: `Found ${llm.cliInfo.servers.length} connector(s) on your Claude account.`, level: 'info' }); } catch (e) { send(ws, { type: 'toast', text: e.message, level: 'warn' }); } broadcast({ type: 'settings', settings: settings() }); break;
+        case 'cliConnector': llm.setCliConnector(String(m.name), !!m.on); saveCliPrefs(); broadcast({ type: 'settings', settings: settings() }); break;
+        case 'answerRequest': company.answerRequest(String(m.id), { text: String(m.text || ''), files: m.files, decline: !!m.decline }); break;
+        case 'applyAnswers': company.applyAnswers(String(m.taskId)).then((r) => send(ws, { type: 'toast', text: `Applied ${r.applied} answer(s) to ${r.updated} deliverable(s).`, level: 'good' })).catch((e) => send(ws, { type: 'toast', text: e.message, level: 'warn' })); break;
         case 'setModel': llm.setModel(String(m.model || '').slice(0, 80)); broadcast({ type: 'settings', settings: settings() }); break;
         case 'setCollab': company.collab = ['full', 'lean', 'off'].includes(m.value) ? m.value : company.collab; broadcast({ type: 'settings', settings: settings() }); break;
         case 'setHiring': company.hiringMode = ['auto', 'ask', 'off'].includes(m.value) ? m.value : company.hiringMode; broadcast({ type: 'settings', settings: settings() }); break;
