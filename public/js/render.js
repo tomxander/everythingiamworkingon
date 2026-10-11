@@ -24,6 +24,9 @@ export class Renderer {
     this.resize();
   }
 
+  addAgent(info) { this.agentsInfo[info.id] = info; }
+  removeAgent(id) { delete this.agentsInfo[id]; if (this.selected === id) this.selected = null; if (this.follow === id) this.follow = null; }
+
   // -------- static world layer (floors, walls, rugs, wall decor) --------
   buildStatic() {
     const { W, H, floor, wall, furniture, rooms } = this.map;
@@ -87,6 +90,7 @@ export class Renderer {
     const w = this.screenToWorld(sx, sy);
     let best = null, bd = 1.1;
     for (const a of snap.agents) {
+      if (!this.agentsInfo[a.id]) continue;
       const d = Math.hypot(a.x - w.x, (a.y - 0.45) - w.y);
       if (d < bd) { bd = d; best = a; }
     }
@@ -108,7 +112,7 @@ export class Renderer {
 
     // y-sorted entities
     const ents = this.sprites.map((s) => ({ kind: 'f', y: s.sortY, s }));
-    for (const a of snap.agents) ents.push({ kind: 'a', y: a.y * T + 8, a });
+    for (const a of snap.agents) if (this.agentsInfo[a.id]) ents.push({ kind: 'a', y: a.y * T + 8, a }); // ignore anyone we have not been introduced to yet
     ents.push({ kind: 'd', y: snap.dog.y * T + 5, d: snap.dog });
     ents.sort((p, q) => p.y - q.y);
     const aliveAnim = new Set();
@@ -234,7 +238,7 @@ export class Renderer {
     const showAll = z >= 1.15 && this.showNames;
     const bubbles = [];
     for (const a of snap.agents) {
-      const info = this.agentsInfo[a.id];
+      const info = this.agentsInfo[a.id]; if (!info) continue;
       const p = this.worldToScreen(a.x, a.y - 1.0);
       const sit = (a.pose === 'type' || a.pose === 'sit') ? 0.12 : 0;
       const topY = p.y + sit * T * z - 4 * z;

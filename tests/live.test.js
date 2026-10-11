@@ -19,6 +19,13 @@ const fake = http.createServer((req, res) => {
     const system = json.system.map((b) => b.text).join('\n');
     const user = json.messages[0].content;
     let text;
+    if (/Open the meeting in 3 to 5 sentences/.test(user)) text = 'Team, plan understood. Owners, confirm.';
+    else if (/Give your approach, anything you need from a named teammate/.test(user)) text = 'I will do my part. Risk: the baseline.';
+    else if (/Write the handoff/.test(user)) text = 'Heads up: see the headline findings.';
+    else if (/Find REAL conflicts/.test(user)) text = '{"conflicts":[]}';
+    else if (/reflecting on work you just finished/.test(system)) text = '{"lessons":[]}';
+    else if (/leading the retrospective/.test(system)) text = '{"wentWell":["ok"],"wentWrong":[],"lessons":[],"rules":[]}';
+    else
     if (/Reply with JSON only/.test(user)) {
       text = 'Here is the plan:\n```json\n' + JSON.stringify({ summary: 'Research, then write.', steps: [
         { agent: 'sol', skill: 'customer-research', instruction: 'Find the language.', deps: [], consult: null },

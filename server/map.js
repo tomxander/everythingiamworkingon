@@ -3,7 +3,7 @@
 
 export const TILE = 16;
 export const W = 48;
-export const H = 31;
+export const H = 41;
 
 const ROOMS = [
   // row A (doors on the bottom wall, facing the hub)
@@ -17,6 +17,8 @@ const ROOMS = [
   { id: 'vault', name: 'The Skill Vault', x: 36, y: 15, w: 12, h: 10, floor: 'vault', doors: ['top', 'bottom'] },
   // bottom lounge
   { id: 'lounge', name: 'The Lounge', x: 0, y: 24, w: 48, h: 7, floor: 'lounge', doors: ['top'] },
+  // where new hires sit: 16 desks ready for the people the team brings in
+  { id: 'annex', name: 'The Annex', x: 0, y: 30, w: 48, h: 11, floor: 'annex', doors: ['top'] },
 ];
 
 const HUB = { id: 'hub', name: 'Town Hall', x: 1, y: 11, w: 46, h: 4, floor: 'hub' };
@@ -228,6 +230,27 @@ export function buildMap() {
     deco('window', ix + 12, iy, 2, 1);
     spots.dogbed = { tx: ix + 19, ty: iy + 4 };
     deco('dogbed', ix + 19, iy + 3, 2, 1);
+  }
+
+  // Annex: open-plan desks for hires, a hiring board and an interview corner
+  {
+    const r = room.annex; const { ix, iy, iw } = interior(r);
+    desks.annex = [];
+    for (const [row, off] of [[0, 2], [1, 6]]) {
+      for (let k = 0; k < 8; k++) {
+        const dx = ix + 2 + k * 5; const dy = iy + off;
+        const desk = f('desk', dx, dy, 2, 1, { room: 'annex', variant: (k + row) % 3 });
+        deco('chair', dx, dy - 1, 1, 1);
+        desks.annex.push({ desk, seat: { tx: dx, ty: dy - 1, x: dx + 1.0, y: dy - 0.5, dir: 'down' }, visit: { tx: dx + 2, ty: dy - 1 } });
+      }
+    }
+    deco('whiteboard', ix + 2, iy, 3, 1, { text: 'WE ARE HIRING' });
+    deco('whiteboard', ix + 20, iy, 3, 1, { text: 'ONBOARDING' });
+    deco('poster', ix + 8, iy, 1, 1, { variant: 1 }); deco('poster', ix + 14, iy, 1, 1, { variant: 2 }); deco('poster', ix + 36, iy, 1, 1, { variant: 0 });
+    f('couch', ix + 40, iy + 1, 4, 1, { dirOut: 'down' }); deco('rug', ix + 39, iy, 6, 3, { color: 'teal' });
+    deco('plant', ix, iy + 8); deco('plant', ix + iw - 1, iy + 8); deco('plant', ix + 22, iy + 8); deco('plant', ix, iy + 1);
+    spots.annexdoor = { tx: 23, ty: 31 };
+    spots.welcome = { tx: 23, ty: 35 };
   }
 
   // walls: windows + brand

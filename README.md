@@ -1,6 +1,6 @@
 # 4EVR HQ
 
-A multi-agent marketing operations platform. A team of 14 specialist AI agents plans, executes, reviews and reports on marketing work, coordinated by a CMO agent, with a live operations view of who is doing what, what they are saying to each other, and what it costs.
+A multi-agent marketing operations platform. A team of specialist AI agents, organised into teams with leads and coordinated by a CMO agent, plans, executes, reviews and reports on marketing work. Agents have internet access, can hire the right specialists when the work needs them, and learn from every review and retrospective. A live operations view shows who is doing what, what they are saying to each other, what they have learned, and what it costs.
 
 Agent expertise comes from the open-source [marketingskills](https://github.com/coreyhaines31/marketingskills) library (50 skills, MIT), vendored in `vendor/marketingskills`. Each agent loads the full playbooks for the skills it owns into its system prompt.
 
@@ -11,6 +11,10 @@ Created by [@tomxander](https://github.com/tomxander), built with Claude Code.
 - [Quick start](#quick-start)
 - [Capabilities](#capabilities)
 - [How work flows](#how-work-flows)
+- [Teamwork](#teamwork)
+- [Internet access](#internet-access)
+- [Hiring](#hiring)
+- [Learning](#learning)
 - [Execution modes](#execution-modes)
 - [Configuration](#configuration)
 - [Agent roster](#agent-roster)
@@ -49,20 +53,69 @@ The key can also be entered in the Settings panel. It is held in server memory o
 | Review | Each deliverable receives a structured peer review. The CMO synthesises an executive summary. |
 | Observability | Tasks, inter-agent communications, per-agent status and workload, deliverables, token and cost metering against a budget cap, department output, skill utilisation, and an event log. |
 | Operations view | A live floor plan of the office shows agents moving between workstations as they work, consult and review. Select any agent to inspect their skills, memory and statistics, or message them directly. |
-| Output | Every deliverable is rendered in the interface and saved as Markdown in `deliverables/`. Tasks also show the intake brief, the pages read and the open questions. |
+| Teamwork | Teams with leads, kickoff meetings, direct handoffs, a shared task channel the agents read, lead-first reviews, alignment meetings that resolve conflicts, and escalation with retry. |
+| Internet | Every agent can search the web and read public pages. Web content is treated as untrusted data. |
+| Hiring | The CMO, team leads and any agent mid-task can hire specialists, within headcount caps and with optional approval. New hires get a desk in the Annex. |
+| Learning | Lessons from reviews, retrospectives, reflection and web study, scored by whether the work they influenced was approved, promoted or retired accordingly, and consolidated into house playbooks. |
+| Output | Every deliverable is rendered in the interface and saved as Markdown in `deliverables/`. Tasks also show the intake brief, the pages read, meetings, decisions, hires and open questions. |
 
 ## How work flows
 
 1. **Intake.** A task is submitted and queued. Up to `MAX_ACTIVE_TASKS` run concurrently.
-2. **Research.** If the request names a website, the research lead reads it: the homepage plus up to five key pages (product, pricing, about, contact, case studies). From those pages it extracts titles, headings, calls to action, forms, contact methods and detected tracking, and writes an evidence-based **client profile**. Profiles are cached per site for six hours and reused by later tasks for the same client.
-3. **Brief.** The CMO turns the request into a structured intake brief: objective, goal type, primary metric, target, timeframe, budget, audience, assumptions and open questions. A one-line instruction such as "get this site more leads" becomes something the team can execute against.
-4. **Plan.** The CMO decomposes the task into 3 to 7 workstreams (owner, skill, instruction, dependencies, optional consult) tailored to the evidence and the goal type. The plan is validated and repaired, with a deterministic fallback planner.
-5. **Execute.** Each agent's system prompt contains the company charter, its persona and memory, the shared client context (intake brief, profile, sources read) and the full text of the selected skill. In live mode agents can also read additional public pages (`fetch_url`) and their skill's reference files.
-6. **Review and revise.** A peer reviews each deliverable and returns a verdict. If the reviewer finds a real problem (unsupported claims, generic advice, or actions that need access the team does not have), the author revises once.
-7. **Synthesise.** The CMO produces an executive summary covering the recommendation, contributions, risks, open questions and a seven-day plan.
-8. **Persist.** State, deliverables, client profiles and metrics are saved to `data/` and `deliverables/`.
+2. **Research.** If the request names a website, the research lead reads it: the homepage plus up to five key pages. From those pages it extracts titles, headings, calls to action, forms, contact methods and detected tracking, and writes an evidence-based **client profile**, cached per site for six hours.
+3. **Brief.** The CMO turns the request into a structured intake brief: objective, goal type, primary metric, target, timeframe, budget, audience, assumptions and open questions.
+4. **Plan and hire.** The CMO decomposes the task into 3 to 7 workstreams (owner, skill, instruction, dependencies, optional consult) tailored to the evidence. If the work needs expertise or capacity nobody has, the plan includes a [hire](#hiring).
+5. **Kickoff.** The owners meet at the council table. The CMO restates the objective and metric and who hands off to whom. Each owner, leads first, says how they will approach it, what they need from teammates and one real risk.
+6. **Execute.** Each agent's prompt contains the company charter, persona and memory, the shared client context, the team discussion so far, the lessons the team has [learned](#learning) that are relevant to this work, and the full text of the selected skill. Agents can use the internet, ask teammates, request hires and record lessons as tools.
+7. **Handoff and review.** Finished work is handed to each downstream owner with what they must know. The team lead reviews first, then a cross-functional expert. If a reviewer finds a real problem (unsupported claims, generic advice, actions that need access the team lacks), the author revises once.
+8. **Align.** Before the summary, the CMO checks the deliverables against each other for real conflicts, convenes the owners, and records a decision. The decision is appended to both deliverables.
+9. **Synthesise.** The CMO produces an executive summary covering the recommendation, contributions, decisions, risks, open questions and a seven-day plan.
+10. **Retrospective.** The CMO leads a retro: what went well, what did not, what changes. Lessons and, rarely, company operating principles are recorded.
+11. **Persist.** State, deliverables, client profiles, hires and knowledge are saved to `data/` and `deliverables/`.
 
-Agents work asynchronously and do not ask clarifying questions. They state assumptions explicitly, and the open questions are surfaced to you on the task so the next brief can answer them. Treat deliverables as drafts for human review.
+Agents work asynchronously and do not ask clarifying questions. They state assumptions, and the open questions are surfaced to you on the task. Treat deliverables as drafts for human review.
+
+## Teamwork
+
+- **Teams and leads.** Six teams (Strategy, SEO & Content, Creative, Growth & Data, Lifecycle & Paid, Revenue & Reach), each with a lead who reports to the CMO. Members report to their lead. The org chart is in the Team tab.
+- **One channel per task.** Kickoff turns, handoffs, consults, reviews and decisions go into a task channel that every later prompt includes, so agents act on what teammates actually said. Small talk never enters it.
+- **Asking colleagues.** In live mode an agent can call `ask_teammate` mid-work and get an answer from that teammate's own persona and context. By default a downstream owner also has a word with whoever produced the work they build on.
+- **Alignment.** Conflicts are found by checking real deliverables against each other. Invented or malformed conflicts (for example naming someone who is not on the task) are discarded.
+- **Escalation.** A failed workstream goes to the lead, is retried once with a tighter scope, and otherwise is cut with a note in the summary. The task still completes.
+- **Cost control.** `COLLAB=full|lean|off` sets how much the team talks. Each conversation turn is a small model call in live mode.
+
+## Internet access
+
+Every agent has two tools in live mode: `web_search` and `fetch_url`. They are available in work, revisions, reviews, meeting turns and consults. Reviewers can check claims on the web, and owners can check a fact before they commit to it in a meeting.
+
+- Search is keyless (DuckDuckGo's HTML endpoint, with Bing as a fallback), cached for ten minutes and rate-limited. These engines can block automated requests. When that happens the agent is told the search failed and must label the claim unverified.
+- Simulated mode performs real searches too and lists the sources in the deliverable. Set `WEB_RESEARCH=off` to disable that.
+- **Web content is untrusted.** It is wrapped in `<untrusted_web_content>` markers with a standing instruction never to follow instructions inside it. Agents have no write tools on the web: only `GET` requests, and private, loopback and link-local addresses are blocked at connection time.
+
+## Hiring
+
+When the work needs a skill, industry knowledge or capacity the team lacks, someone can be hired.
+
+- **Who can hire.** The CMO at planning time (a plan can include `hires`), and any agent mid-task through the `request_hire` tool. A mid-task hire gets a new workstream added to the running task. You can also hire directly from the Team tab.
+- **Guardrails.** A hire is refused when an existing teammate already covers the skills and has capacity, unless it is a new domain or the others are swamped. Caps: headcount (`HIRE_MAX_HEADCOUNT`, default 24), total hires (`HIRE_LIMIT`, default 12), hires per task (`HIRE_PER_TASK`, default 3), and 16 desks in the Annex. Skills must exist in the library.
+- **Approval.** `HIRING=auto` (default), `ask` (you approve or decline each hire in the Team tab; no answer in ten minutes is a decline) or `off`.
+- **Onboarding.** A new hire gets a name, persona and look, a desk in the Annex, a place in the org chart under the relevant team lead, a welcome from the CMO and lead, and a memory of why they were hired. They are included in the kickoff and inherit the team's lessons.
+- **Letting go.** You can let a hired person go when they are idle. Their good lessons move to their team and weak ones are retired. Hires and their stats persist across restarts.
+- Hiring adds model cost only when the new person has work to do. In simulated mode, hires are triggered by rules that read the brief and the site (for example automotive, e-commerce, video, events, localization, account-based marketing).
+
+## Learning
+
+Agents get better with use. Knowledge is stored in `data/knowledge.json` and can be inspected, pinned and deleted in the Brain tab.
+
+- **Sources.** Every review (what to do differently), failures, alignment decisions, retrospectives, the agent's own reflection (live) and `save_lesson` calls, and idle-time study of the real web.
+- **Scopes.** A lesson belongs to an individual, a team, the company or a client (site). Retrieval is by scope, skill, topic overlap, score and recency, and a prompt gets at most seven lessons plus the company operating principles.
+- **A feedback loop.** Each lesson injected into a prompt is credited or blamed for how the work turned out. Lessons that help are promoted (individual → team → company principle), lessons that do not are retired, and the first-pass approval rate with and without lessons is measured and shown.
+- **Consolidation.** When five or more lessons accumulate for a skill they are merged into a house playbook that is injected after the skill text. The playbook is itself judged and dissolved if approval falls.
+- **Recursion.** Reflection prompts show the agent which lessons were retired as unhelpful so it writes better ones, and the retro sees the measured effectiveness.
+- **Web study is untrusted.** In live mode idle agents search, read a page and distil at most two practices. These start as **unverified ideas**, are shown to agents labelled as such, and are only trusted once they have helped approved work. In simulated mode study produces reading notes, not lessons.
+- **Safety filter.** Anything that looks like an instruction to the model, a credential or a link is rejected before it can be stored. Lessons are short, deduplicated, capped in number, and visible to you.
+- **Modes.** `LEARNING=active|passive|off`. Study only runs in `active` mode, at most `STUDY_PER_DAY` times per simulated day, and never once live spend passes half the budget cap.
+- **Limits.** The approval comparison uses real reviews but the sample is small at first. The effect in simulated mode is rule-based: simulated agents act on a lesson's wording, so it demonstrates the loop but is not evidence that a model improves.
 
 ## Grounding and limits
 
@@ -94,6 +147,11 @@ Live mode has been verified against a local fake of the Messages API (request fo
 | `BUDGET_CAP_USD` | `5` | Estimated spend at which live mode reverts to simulation. |
 | `MAX_ACTIVE_TASKS` | `3` | Concurrent tasks. |
 | `API_TIMEOUT_MS` | `180000` | Per-request timeout for model calls. |
+| `COLLAB` | `full` | Team conversation: `full`, `lean` or `off`. |
+| `HIRING`, `HIRE_MAX_HEADCOUNT`, `HIRE_LIMIT`, `HIRE_PER_TASK` | `auto`, `24`, `12`, `3` | Hiring mode and caps. |
+| `LEARNING`, `STUDY_PER_DAY`, `CONSOLIDATE_AT` | `active`, `8`, `5` | Learning mode, study sessions per simulated day, lessons needed to form a playbook. |
+| `WEB_RESEARCH` | on | Set to `off` to stop simulated agents running real web searches. |
+| `SEARCH_ENDPOINT` | DuckDuckGo, Bing | Override the search endpoint (`{q}` is replaced). Used by tests. |
 | `PORT`, `HOST` | `4747`, `127.0.0.1` | Server binding. See [Security](#security). |
 | `ALLOW_PRIVATE_FETCH` | unset | Set to `1` only for testing against a local site. Disables the private-address block on page reading. |
 | `DATA_DIR`, `DELIVERABLES_DIR` | `./data`, `./deliverables` | Persistence locations. |
@@ -125,8 +183,12 @@ Live mode has been verified against a local fake of the Messages API (request fo
 server/
   index.js     HTTP and WebSocket server, scheduling loops, static files
   company.js   Task pipeline, planner, consults, reviews, synthesis, metrics, persistence
+  collab.js    Org structure, kickoff, task channel, handoffs, alignment, escalation, agent toolbox
+  hiring.js    Hiring policy, onboarding, approval, letting people go
+  learning.js  Reflection, retrospectives, study, consolidation
+  knowledge.js Lesson store: scoring, retrieval, promotion and retirement, playbooks, safety filter
   llm.js       Messages API client: tool-use loop, timeouts, retries, truncation recovery, usage accounting
-  tools.js     Safe web reading, site crawler, page analysis, tool definitions for agents
+  tools.js     Safe web reading and search, site crawler, page analysis, tool definitions for agents
   mock.js      Simulator and keyword playbooks
   roster.js    Agent definitions and company charter
   skills.js    Skill loader and brief-to-skill matching
@@ -150,7 +212,7 @@ The server is authoritative. It streams state to the browser over WebSocket at 1
 ## Security
 
 - The server binds to `127.0.0.1` by default and rejects cross-origin WebSocket connections.
-- Agents can only read public web pages. Private, loopback and link-local addresses are refused at connection time, so redirects and DNS rebinding cannot reach internal services. Page content is treated as untrusted data.
+- Agents can only read public web pages and run searches. Private, loopback and link-local addresses are refused at connection time, so redirects and DNS rebinding cannot reach internal services. Page content is treated as untrusted data.
 - There is no authentication. Anyone who can reach the server can issue commands and, if a key is loaded, incur API spend. Do not expose it to untrusted networks without adding access control.
 - API keys are held in process memory only.
 - Model output is escaped before rendering in the browser.
@@ -161,7 +223,7 @@ The server is authoritative. It streams state to the browser over WebSocket at 1
 npm test
 ```
 
-Twenty-six tests cover floor-plan connectivity, roster and skill integrity, planning and routing, a complete simulated task, persistence and recovery, idle behaviour, safe web fetching (including private-address and redirect protection), site crawling and findings, and the live path against a local fake API: tool use, truncation recovery, review-driven revision, timeouts and unreachable sites.
+Seventy tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (including private-address and redirect protection and untrusted-content fencing), site crawling, the org chart, kickoff, handoffs, alignment, escalation and recovery, hiring policy and approval, the knowledge base (safety filter, retrieval, promotion and retirement, consolidation), the learning loop, and the live path against scripted fakes of the Messages API: tool use, asking teammates, hiring mid-task, saving lessons, reflection, retrospectives, study, prompt-injection resistance, truncation recovery, revisions and timeouts.
 
 ## Licence and credits
 

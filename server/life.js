@@ -117,7 +117,9 @@ export class Life {
     a.pose = 'type'; sim.emoteFor(a, 'book', 3);
     const skill = choice(a.skills);
     sim.say(a, `Re-reading the ${skill} playbook`, 4);
-    await sim.sleep(6 + Math.random() * 5, tok);
+    // self-study: search and read the real web about the craft (bounded by the learning mode and budget)
+    if (this.bus.canStudy?.() && Math.random() < 0.6) await this.bus.study(a, tok);
+    else await sim.sleep(6 + Math.random() * 5, tok);
     if (!tok.cancelled) a.pose = 'stand';
   }
 
@@ -147,7 +149,8 @@ export class Life {
     const sim = this.sim;
     const others = [...sim.agents.values()].filter((o) => o !== a && this.free(o) && !o.ambientLock);
     if (!others.length) return this.tinker(a, tok);
-    const b = choice(others);
+    const mates = others.filter((o) => o.dept === a.dept);
+    const b = mates.length && Math.random() < 0.6 ? choice(mates) : choice(others); // people talk to their own team more
     b.ambientLock = true; sim.claim(b);
     try { await this.talkPair(a, b, tok, { visit: true }); } finally { b.ambientLock = false; }
   }

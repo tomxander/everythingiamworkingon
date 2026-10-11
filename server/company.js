@@ -7,7 +7,11 @@ import { COMPANY, DEPT_META } from './roster.js';
 import { bestSkill, skillPrompt } from './skills.js';
 import { extractJson } from './llm.js';
 import { planFromPlaybooks, heuristicIntake } from './mock.js';
-import { crawlSite, extractUrls, siteFindings, snapshotToText, TOOL_DEFS, makeToolHandler } from './tools.js';
+import { crawlSite, extractUrls, siteFindings, snapshotToText, TOOL_DEFS, makeToolHandler, webSearch } from './tools.js';
+import { Knowledge } from './knowledge.js';
+import { collab } from './collab.js';
+import { hiring } from './hiring.js';
+import { learning } from './learning.js';
 
 const MAX_ACTIVE_TASKS = Number(process.env.MAX_ACTIVE_TASKS || 3);
 const CLIENT_TTL = 6 * 3600 * 1000; // re-read a client's site after 6 hours
@@ -21,9 +25,16 @@ export class Company extends EventEmitter {
     this.dataDir = dataDir; this.deliverablesDir = deliverablesDir;
     this.tasks = new Map(); this.deliverables = new Map();
     this.comms = []; this.log = [];
-    this.seq = { task: 0, deliv: 0, msg: 0, log: 0 };
+    this.seq = { task: 0, deliv: 0, msg: 0, log: 0, hire: 0, hireReq: 0 };
     this.skillUse = {};
     this.clients = new Map(); // host -> { host, url, fetchedAt, snapshot, profile }
+    this.kb = new Knowledge(dataDir);                      // what the company has learned
+    this.collab = process.env.COLLAB || 'full';            // full | lean | off: how much the team talks (and how many model calls that costs)
+    this.hiringMode = process.env.HIRING || 'auto';        // auto | ask | off
+    this.hiringCaps = { headcount: Number(process.env.HIRE_MAX_HEADCOUNT || 24), total: Number(process.env.HIRE_LIMIT || 12), perTask: Number(process.env.HIRE_PER_TASK || 3) };
+    this.hires = new Map(); this.hireRequests = new Map(); this.schedulers = new Map();
+    this.webResearch = process.env.WEB_RESEARCH !== 'off';  // simulated mode also does real web searches
+    this.life = null;
     this.history = []; // sparkline samples
     this.budgetCap = Number(process.env.BUDGET_CAP_USD || 5);
     this.queue = []; this.active = 0;
@@ -49,7 +60,8 @@ export class Company extends EventEmitter {
   pushTask(task) { this.emit('broadcast', { type: 'task', task: this.publicTask(task) }); }
 
   publicTask(t) {
-    return { ...t, subtasks: t.subtasks.map((s) => ({ ...s })) };
+    const { thread, ...rest } = t; // the shared channel is for the agents; the UI gets meetings and decisions
+    return { ...rest, subtasks: t.subtasks.map((s) => ({ ...s })) };
   }
 
   /** run `fn` while holding the agent: they stop what they were doing and queue behind their own work. */
@@ -150,6 +162,9 @@ export class Company extends EventEmitter {
     this.sim.say(vera, `${task.subtasks.length} workstreams. Go.`, 4);
     this.addLog(`Vera planned ${task.id} into ${task.subtasks.length} workstreams`, { type: 'task', taskId: task.id, agent: 'vera' });
 
+    // 3. Kickoff: the owners are briefed together and say what they need from each other
+    await this.kickoff(task).catch((e) => this.addLog(`Kickoff skipped (${e.message})`, { type: 'system', taskId: task.id }));
+
     // run subtasks as their dependencies finish
     await new Promise((resolve) => {
       const started = new Set();
@@ -160,26 +175,35 @@ export class Company extends EventEmitter {
           if (failedDep) { s.status = 'failed'; started.add(s.id); continue; }
           if (s.deps.every((d) => task.subtasks[d]?.status === 'done')) {
             started.add(s.id); s.status = 'ready';
-            this.runSubtask(task, s).catch((e) => { s.status = 'failed'; s.error = String(e.message || e); this.addLog(`${s.id} failed: ${s.error}`, { type: 'task', taskId: task.id, agent: s.agent }); })
-              .finally(() => { this.pushTask(task); advance(); });
+            this.runSubtask(task, s).catch(async (e) => {
+              // a failure goes to the lead first; one retry; otherwise the workstream is cut and the gap is flagged
+              const recovered = await this.escalate(task, s, e).catch(() => false);
+              if (!recovered) { s.status = 'failed'; s.error = String(e.message || e); this.addLog(`${s.id} failed: ${s.error}`, { type: 'task', taskId: task.id, agent: s.agent }); }
+            }).finally(() => { this.pushTask(task); advance(); });
           }
         }
         if (task.subtasks.every((s) => s.status === 'done' || s.status === 'failed')) resolve();
       };
+      this.schedulers.set(task.id, advance); // lets someone hired mid-task add a workstream
       advance();
     });
+    this.schedulers.delete(task.id);
 
     const doneSubs = task.subtasks.filter((s) => s.status === 'done');
     if (!doneSubs.length) { task.status = 'failed'; task.error = task.error || 'All workstreams failed.'; this.pushTask(task); return; }
 
     // review & synthesis by Vera
     task.status = 'review'; this.pushTask(task);
+    // 4. Alignment: look for real conflicts between the deliverables and decide them before the summary
+    await this.alignment(task, doneSubs).catch((e) => this.addLog(`Alignment skipped (${e.message})`, { type: 'system', taskId: task.id }));
     await this.synthesize(task, doneSubs);
     task.status = 'done'; task.finished = Date.now(); this.completed++;
     this.pushTask(task);
     this.addLog(`${task.id} complete: ${task.title}`, { type: 'task', taskId: task.id, agent: 'vera' });
     this.toast(`Task ${task.id} complete: ${task.title}`, 'good');
     await this.finale(task, doneSubs);
+    // 5. Retrospective: what worked, what did not, what changes. This is where the company learns.
+    await this.retro(task, doneSubs).catch((e) => this.addLog(`Retro skipped (${e.message})`, { type: 'system', taskId: task.id }));
     this.save();
   }
 
@@ -189,7 +213,7 @@ export class Company extends EventEmitter {
     const system = [
       `${COMPANY.charter}\n\nYou are Vera Quill, CMO of 4EVR. Your job right now is to turn God's request into a plan of 3 to 7 workstreams, each owned by exactly one teammate and one of THEIR listed skills. Parallelise where possible; use "deps" (0-based indexes of earlier workstreams) only when the work truly needs another's output. Optionally set "consult" to a teammate id who should be asked for a quick opinion first. Do not assign final executive summary work; you will write that yourself.\n\nTeam:\n${rosterText}`,
     ];
-    const user = `Request title: ${task.title}\n\nBrief:\n${task.brief || '(none beyond the title)'}\n\n${this.contextText(task, 6000)}\n\nPlanning rules:\n- Tailor every workstream to the evidence above. Name the real pages, offers and gaps.\n- Nobody on the team can log in to ad accounts, analytics, a CRM or the client's CMS, or change the live site. Plan recommendations and ready-to-use assets, not actions inside those systems.\n- Match the goal type (${task.intake?.goalType || 'unknown'}): for inbound leads from a website plan conversion, SEO, copy, lead capture and nurture, paid and tracking. Use outbound or cold email only if the request asks for it.\n- Always include one workstream that makes the result measurable.\n\nReply with JSON only, in this shape:\n{"summary":"one sentence on the approach","steps":[{"agent":"id","skill":"skill-name","instruction":"what exactly they must produce","deps":[],"consult":null}]}`;
+    const user = `Request title: ${task.title}\n\nBrief:\n${task.brief || '(none beyond the title)'}\n\n${this.contextText(task, 6000)}\n\nPlanning rules:\n- Tailor every workstream to the evidence above. Name the real pages, offers and gaps.\n- Nobody on the team can log in to ad accounts, analytics, a CRM or the client's CMS, or change the live site. Plan recommendations and ready-to-use assets, not actions inside those systems.\n- Match the goal type (${task.intake?.goalType || 'unknown'}): for inbound leads from a website plan conversion, SEO, copy, lead capture and nurture, paid and tracking. Use outbound or cold email only if the request asks for it.\n- Always include one workstream that makes the result measurable.${this.hiringMode === 'off' ? '' : `\n- Hiring: if the work needs domain expertise or capacity nobody on the team has (for example an industry specialist), you may hire. Add it to "hires" and assign a step to it with "agent":"hire:0" (its index in "hires"). Hire only when no current teammate can do the job well. Skills must come from the skill names the team already uses.`}\n\nReply with JSON only, in this shape:\n{"summary":"one sentence on the approach","hires":[{"role":"job title","skills":["skill-name"],"why":"why nobody here can do it","domain":"optional one word"}],"steps":[{"agent":"id","skill":"skill-name","instruction":"what exactly they must produce","deps":[],"consult":null}]}`;
     let raw = null;
     try {
       const res = await this.llm.complete({ kind: 'plan', system, user, maxTokens: 1600, ctx: { title: task.title, brief: task.brief, intake: task.intake } });
@@ -200,6 +224,7 @@ export class Company extends EventEmitter {
       this.addLog(`Planner error (${e.message}); falling back to playbook`, { type: 'system' });
     }
     const plan = this.normalizePlan(raw) || planFromPlaybooks(task.title, task.brief, 7, task.intake?.playbook);
+    await this.applyHires(task, plan, raw?.hires); // new people are hired before anyone starts, so the kickoff includes them
     // make sure each chosen skill belongs to the agent (fallback to best match)
     for (const s of plan.steps) {
       const a = this.agent(s.agent);
@@ -212,7 +237,7 @@ export class Company extends EventEmitter {
     if (!raw || !Array.isArray(raw.steps) || !raw.steps.length) return null;
     const steps = [];
     for (const s of raw.steps.slice(0, 8)) {
-      if (!s || !this.agent(s.agent)) continue;
+      if (!s || !(this.agent(s.agent) || /^hire:\d+$/.test(s.agent || ''))) continue;
       steps.push({ agent: s.agent, skill: String(s.skill || ''), instruction: clip(String(s.instruction || 'Contribute your expertise.'), 500), deps: [], consult: this.agent(s.consult) && s.consult !== s.agent ? s.consult : null, _deps: Array.isArray(s.deps) ? s.deps : [] });
     }
     if (!steps.length) return null;
@@ -236,7 +261,9 @@ export class Company extends EventEmitter {
       this.addLog(`${a.name} started ${sub.skill} on ${task.id}`, { type: 'agent', agent: a.id, taskId: task.id });
       this.addComms({ from: a.id, to: 'all', text: `Starting ${sub.skill} for "${clip(task.title, 60)}".`, kind: 'task', taskId: task.id });
 
-      if (sub.consult) { try { await this.consult(a, this.agent(sub.consult), task, sub, tok); } catch (e) { this.addLog(`Consult skipped (${e.message})`, { type: 'system', agent: a.id }); a.pose = 'stand'; } }
+      // a planned consult, or by default a word with whoever produced the work you are building on
+      const consultWith = sub.consult || (this.collab === 'full' && sub.deps.length ? task.subtasks[sub.deps[0]]?.agent : null);
+      if (consultWith && consultWith !== a.id) { try { await this.consult(a, this.agent(consultWith), task, sub, tok); } catch (e) { this.addLog(`Consult skipped (${e.message})`, { type: 'system', agent: a.id }); a.pose = 'stand'; } }
 
       await sim.goTo(a, a.desk.seat, { pose: 'sit', tok }); a.pose = 'type';
       sim.emoteFor(a, 'dots', 3);
@@ -248,14 +275,16 @@ export class Company extends EventEmitter {
         return { agentName: this.agent(s.agent).name, agentShort: this.agent(s.agent).short, skill: s.skill, text: d.markdown, headline: s.headline || '' };
       });
 
-      const system = this.workSystem(a, task, skill);
-      const user = `## Client request\nTitle: ${task.title}\n${task.brief || '(no further brief)'}\n\n## Your assignment (skill: ${sub.skill})\n${sub.instruction}\n\n## Upstream work from teammates\n${prior.length ? prior.map((p) => `### ${p.agentName} (${p.skill})\n${clip(p.text, 1800)}`).join('\n\n') : '(none; you are first in the chain)'}\n\n## Rules for this deliverable\n- Ground every statement about the client in the client context above and cite the page URL. Label anything you could not verify as "Not verified".\n- You cannot log in to or change the client's systems. Give recommendations and ready-to-use assets (copy, specs, configurations) and say who should apply them.\n- Do not ask questions. State assumptions and proceed.\n\n## Deliverable format\nMarkdown. Start with a "# " title. Include: Assumptions (bullets), the work product itself, ready to use, then "Next actions" and "How we'll know it worked". About 500 to 900 words unless the work needs more.`;
+      const kbb = this.kbBlock(a, task, skill, sub.instruction); sub.lessonIds = kbb.ids; sub.hadLessons = kbb.ids.length > 0;
+      const system = this.workSystem(a, task, skill, kbb.text);
+      const thread = this.threadText(task, a.id);
+      const user = `## Client request\nTitle: ${task.title}\n${task.brief || '(no further brief)'}\n\n## Your assignment (skill: ${sub.skill})\n${sub.instruction}\n\n## Upstream work from teammates\n${prior.length ? prior.map((p) => `### ${p.agentName} (${p.skill})\n${clip(p.text, 1800)}`).join('\n\n') : '(none; you are first in the chain)'}${thread ? `\n\n## Team discussion so far (read it, and answer anything addressed to you)\n${thread}` : ''}\n\n## Rules for this deliverable\n- Ground every statement about the client in the client context above and cite the page URL. Label anything you could not verify as "Not verified".\n- You cannot log in to or change the client's systems. Give recommendations and ready-to-use assets (copy, specs, configurations) and say who should apply them.\n- Do not ask questions. State assumptions and proceed.\n\n## Deliverable format\nMarkdown. Start with a "# " title. Include: Assumptions (bullets), the work product itself, ready to use, then "Next actions" and "How we'll know it worked". About 500 to 900 words unless the work needs more.`;
 
       this.guardBudget();
+      const web = this.llm.mode === 'mock' ? await this.mockWebResearch(task, a, skill) : null; // simulated mode still really searches the web
       const res = await this.llm.complete({
-        kind: 'work', system, user, maxTokens: 3500, maxTurns: 5,
-        tools: TOOL_DEFS, onTool: makeToolHandler({ skill, log: (t) => { sim.say(a, t, 3); this.emit('comms', { from: a.id, to: 'all', text: t, kind: 'task', taskId: task.id }); } }),
-        ctx: { title: task.title, brief: task.brief, intake: task.intake, snapshot: this.primarySnapshot(task), agent: { id: a.id, name: a.name, short: a.short, role: a.role }, skill: skill && { name: skill.name, title: skill.title, body: skill.body }, instruction: sub.instruction, priorOutputs: prior },
+        kind: 'work', system, user, maxTokens: 3500, ...this.toolkit(a, task, { skill }),
+        ctx: { web, lessons: kbb.ids.map((id) => this.kb.lessons.get(id)?.text).filter(Boolean).slice(0, 5), thread: (task.thread || []).filter((m) => (m.to === a.id || m.kind === 'decision' || (m.kind === 'kickoff' && m.from !== a.id)) && m.kind !== 'review').slice(-4), title: task.title, brief: task.brief, intake: task.intake, snapshot: this.primarySnapshot(task), agent: { id: a.id, name: a.name, short: a.short, role: a.role }, skill: skill && { name: skill.name, title: skill.title, body: skill.body }, instruction: sub.instruction, priorOutputs: prior },
       });
       if (res.truncated) this.addLog(`${a.name}'s ${sub.skill} output hit the length limit even after continuing`, { type: 'system', agent: a.id });
       if (this.llm.mode === 'mock' || res.simulated) await this.sleepSim(res.latencyMs / 1000, tok);
@@ -269,6 +298,7 @@ export class Company extends EventEmitter {
       a.memory.push({ t: Math.round(sim.time), text: `Delivered ${sub.skill} work for "${clip(task.title, 50)}": ${clip(sub.headline || '', 80)}` });
       if (a.memory.length > 14) a.memory.shift();
       sim.emoteFor(a, 'star', 3); sim.say(a, 'Shipped.', 3);
+      await this.handoffs(task, sub, a, d, tok).catch((e) => this.addLog(`Handoff skipped (${e.message})`, { type: 'system', agent: a.id }));
       this.addComms({ from: a.id, to: 'all', text: `Delivered ${skill?.title || sub.skill}. ${sub.headline ? 'Headline: ' + clip(sub.headline, 140) : ''}`, kind: 'task', taskId: task.id });
       this.addLog(`${a.name} delivered ${sub.skill} for ${task.id}`, { type: 'deliverable', agent: a.id, taskId: task.id });
       this.pushTask(task);
@@ -288,12 +318,12 @@ export class Company extends EventEmitter {
     const ctxQ = { title: task.title, to: { name: b.name, short: b.short, quirks: b.quirks }, from: a };
     const q = await this.llm.complete({ kind: 'consult_q', system: `You are ${a.name}, ${a.role}. ${a.persona} Ask ${b.name} (${b.role}) one short, specific question to sharpen your ${sub.skill} work. One or two sentences, no preamble.`, user: `Task: ${task.title}\n${task.brief}\nYour assignment: ${sub.instruction}`, maxTokens: 120, ctx: ctxQ });
     this.account(task, q); if (this.llm.mode === 'mock') await this.sleepSim(1.2, tok);
-    a.pose = 'talk'; sim.say(a, q.text, 5.5); this.emit('comms', { from: a.id, to: b.id, text: q.text, kind: 'consult', taskId: task.id });
+    a.pose = 'talk'; sim.say(a, q.text, 5.5); this.talk(task, { from: a.id, to: b.id, text: q.text, kind: 'consult' });
     b.dir = 'right';
     await this.sleepSim(4, tok);
     const ans = await this.llm.complete({ kind: 'consult_a', system: `You are ${b.name}, ${b.role}. ${b.persona} Answer ${a.name}'s question in two sentences max with one concrete piece of advice from your craft.`, user: `Question: ${q.text}\nTask: ${task.title}\n${task.brief}`, maxTokens: 160, ctx: { title: task.title, to: b, from: a } });
     this.account(task, ans);
-    b.pose = 'talk'; a.pose = 'stand'; sim.say(b, ans.text, 5.5); this.emit('comms', { from: b.id, to: a.id, text: ans.text, kind: 'consult', taskId: task.id });
+    b.pose = 'talk'; a.pose = 'stand'; sim.say(b, ans.text, 5.5); this.talk(task, { from: b.id, to: a.id, text: ans.text, kind: 'consult' });
     a.stats.consults++; b.mood = Math.min(100, b.mood + 3);
     a.memory.push({ t: Math.round(sim.time), text: `${b.short} advised: ${clip(ans.text, 90)}` });
     await this.sleepSim(4, tok);
@@ -301,25 +331,25 @@ export class Company extends EventEmitter {
   }
 
   async review(task, sub) {
-    const reviewerId = ['vera', 'sol', 'dee', 'theo'].filter((id) => id !== sub.agent)[(sub.idx + task.simCreated) % 3];
-    const r = this.agent(reviewerId); const author = this.agent(sub.agent);
+    const author = this.agent(sub.agent); const r = this.pickReviewer(author, sub); // the team lead reviews first, then a cross-functional expert
     const d = this.deliverables.get(sub.outputId); if (!d) return;
     try {
       const res = await this.llm.complete({
-        kind: 'review', maxTokens: 400,
+        kind: 'review', maxTokens: 400, ...this.toolkit(r, task, { light: true }),
         system: `You are ${r.name}, ${r.role} at 4EVR. ${r.persona}\nYou are doing a peer review of ${author.name}'s deliverable. Judge it against the client context. Be strict about three things: claims about the client that are not backed by the context (or labelled Not verified), generic advice that could apply to any company, and actions that would need access we do not have.\nReply with JSON only: {"verdict":"approve" or "revise","strength":"one sentence","improvement":"one concrete sentence"}. Use "revise" only for a real problem, not style.\n\n${this.contextText(task, 3500)}`,
-        user: clip(d.markdown, 5000), ctx: { title: task.title, agent: r },
+        user: clip(d.markdown, 5000), ctx: { title: task.title, agent: r, markdown: d.markdown },
       });
       this.account(task, res);
       const j = extractJson(res.text);
       const verdict = j?.verdict === 'revise' ? 'revise' : 'approve';
       const text = j ? `${j.strength || ''} ${j.improvement || ''} (${verdict === 'revise' ? 'Needs revision' : 'Approved'})`.trim() : res.text;
-      sub.review = { by: r.id, text, verdict };
+      sub.review = { by: r.id, text, verdict, strength: j?.strength || null, improvement: j?.improvement || null };
       this.sim.say(r, `Reviewed ${author.short}'s work`, 3);
-      this.emit('comms', { from: r.id, to: author.id, text, kind: 'review', taskId: task.id });
+      this.talk(task, { from: r.id, to: author.id, text, kind: 'review' });
       author.mood = Math.min(100, author.mood + 3);
       r.memory.push({ t: Math.round(this.sim.time), text: `Reviewed ${author.short}'s ${sub.skill}` });
       this.pushTask(task);
+      await this.afterReview(task, sub, author, sub.review); // credit or blame the lessons that were in the prompt, and learn from the feedback
       if (verdict === 'revise' && !res.simulated && !sub.revised) await this.revise(task, sub, j.improvement || text);
     } catch (e) { /* review is best-effort */ }
   }
@@ -333,8 +363,7 @@ export class Company extends EventEmitter {
       await this.sim.goTo(a, a.desk.seat, { pose: 'sit', tok }); a.pose = 'type'; this.sim.say(a, 'Fixing the review notes…', 3);
       this.addComms({ from: a.id, to: sub.review?.by || 'all', text: `Revising after review: ${clip(feedback, 160)}`, kind: 'task', taskId: task.id });
       const res = await this.llm.complete({
-        kind: 'revise', maxTokens: 3500, maxTurns: 4, system: this.workSystem(a, task, skill),
-        tools: TOOL_DEFS, onTool: makeToolHandler({ skill, log: (t) => this.emit('comms', { from: a.id, to: 'all', text: t, kind: 'task', taskId: task.id }) }),
+        kind: 'revise', maxTokens: 3500, system: this.workSystem(a, task, skill), ...this.toolkit(a, task, { skill }),
         user: `Here is your deliverable and a reviewer's finding. Fix the finding and return the complete improved deliverable in the same format. Do not shrink it, and do not mention the review inside the deliverable.\n\n## Reviewer finding\n${feedback}\n\n## Your deliverable\n${d.markdown}`,
         ctx: { title: task.title },
       });
@@ -357,10 +386,10 @@ export class Company extends EventEmitter {
       await this.sim.goTo(vera, vera.desk.seat, { pose: 'sit', tok }); vera.pose = 'type';
       this.sim.say(vera, 'Pulling it together…', 4);
       const system = [`${COMPANY.charter}\n\nYou are Vera Quill, CMO of 4EVR. ${vera.persona}`, skillPrompt(this.skills['marketing-plan'], 6000)];
-      const user = `Synthesize the team's work into an executive summary for God on: ${task.title}\n\nBrief:\n${task.brief || '(title only)'}\n\n${this.contextText(task, 3000)}\n\nTeam output:\n${outputs.map((o) => `## ${o.agentName} (${o.skill})\n${clip(o.text, 2200)}`).join('\n\n')}\n\nWrite: The call (3 sentences), What each specialist contributed (one line each), Open questions for God (use the intake open questions that still matter), Risks and open decisions, Next 7 days, How we'll know it worked. Anything the team could not verify must be stated as such. Under 600 words.`;
+      const user = `Synthesize the team's work into an executive summary for God on: ${task.title}\n\nBrief:\n${task.brief || '(title only)'}\n\n${this.contextText(task, 3000)}${(task.decisions || []).length ? `\n\n## Decisions made in alignment meetings\n${task.decisions.map((d) => `- ${d.issue} DECISION: ${d.decision}`).join('\n')}` : ''}${(task.hires || []).length ? `\n\n## People hired for this task\n${task.hires.map((id) => { const h = this.agent(id); return h ? `- ${h.name}, ${h.role}: ${h.why || ''}` : ''; }).join('\n')}` : ''}\n\nTeam output:\n${outputs.map((o) => `## ${o.agentName} (${o.skill})\n${clip(o.text, 2200)}`).join('\n\n')}\n\nWrite: The call (3 sentences), What each specialist contributed (one line each), Open questions for God (use the intake open questions that still matter), Risks and open decisions, Next 7 days, How we'll know it worked. Anything the team could not verify must be stated as such. Under 600 words.`;
       let res;
       try {
-        res = await this.llm.complete({ kind: 'synth', system, user, maxTokens: 2200, ctx: { title: task.title, outputs, intake: task.intake } });
+        res = await this.llm.complete({ kind: 'synth', system, user, maxTokens: 2200, ctx: { title: task.title, outputs, intake: task.intake, decisions: task.decisions } });
         if (res.simulated) await this.sleepSim(res.latencyMs / 1000, tok);
         this.account(task, res);
       } catch (e) {
@@ -418,9 +447,9 @@ export class Company extends EventEmitter {
     return clip(parts.join('\n\n') || '## Client context\n(No website or structured context available. Work only from the request and mark assumptions.)', max);
   }
 
-  workSystem(a, task, skill) {
+  workSystem(a, task, skill, kbText = '') {
     return [
-      `${COMPANY.charter}\n\nYou are ${a.name}, ${a.role} at 4EVR. ${a.persona}${a.memory.length ? `\n\nThings you remember from recent work:\n${a.memory.slice(-6).map((m) => `- ${m.text}`).join('\n')}` : ''}\n\n# Client context (shared by the whole team)\n${this.contextText(task, 9000)}`,
+      `${COMPANY.charter}\n\nYou are ${a.name}, ${a.role} at 4EVR${a.reportsTo ? `, reporting to ${this.agent(a.reportsTo)?.name || 'the CMO'}` : ''}. ${a.persona}${a.memory.length ? `\n\nThings you remember from recent work:\n${a.memory.slice(-6).map((m) => `- ${m.text}`).join('\n')}` : ''}${kbText ? `\n\n${kbText}` : ''}\n\n# Client context (shared by the whole team)\n${this.contextText(task, 9000)}`,
       skillPrompt(skill),
     ];
   }
@@ -497,6 +526,15 @@ export class Company extends EventEmitter {
       this.addLog(`Intake call failed (${e.message}); used the heuristic intake`, { type: 'system' });
       return fallback;
     }
+  }
+
+  /** Simulated mode cannot reason about the web, but it can still really search it and show what came back. */
+  async mockWebResearch(task, a, skill) {
+    if (!this.webResearch) return null;
+    const topic = (task.intake?.objective || task.title).replace(/^(make|get)\s+\S+\s+/i, '').slice(0, 70);
+    const query = `${skill?.title || 'marketing'} ${topic}`.slice(0, 120);
+    try { const results = await webSearch(query, { max: 3 }); this.talk(task, { from: a.id, to: 'all', kind: 'research', text: `Searched the web: "${clip(query, 70)}" (${results.length} results)` }); return { query, results }; }
+    catch (e) { return { query, error: e.message }; }
   }
 
   saveDeliverable(task, sub, agent, res, kind = 'work') {
@@ -593,7 +631,7 @@ export class Company extends EventEmitter {
     const byStatus = {}; for (const t of this.tasks.values()) byStatus[t.status] = (byStatus[t.status] || 0) + 1;
     return {
       llm: this.llm.status(), budgetCap: this.budgetCap, completed: this.completed, tasks: this.tasks.size, byStatus, deliverables: this.deliverables.size,
-      depts, skillUse: this.skillUse, history: this.history,
+      depts, skillUse: this.skillUse, history: this.history, learning: this.kb.summary(), hiring: this.hiringStatus(), collab: this.collab,
       morale: Math.round(agents.reduce((s, a) => s + a.mood, 0) / agents.length), energy: Math.round(agents.reduce((s, a) => s + a.energy, 0) / agents.length),
       active: this.active, queued: this.queue.length,
       agents: agents.map((a) => ({ id: a.id, stats: a.stats, memory: a.memory.slice(-8), skillUse: a.skillUse })),
@@ -605,10 +643,11 @@ export class Company extends EventEmitter {
     try {
       fs.mkdirSync(this.dataDir, { recursive: true });
       const agents = {}; for (const a of this.sim.agents.values()) agents[a.id] = { stats: a.stats, memory: a.memory, skillUse: a.skillUse, mood: a.mood, energy: a.energy };
+      this.kb.save();
       const data = {
         v: 1, savedAt: Date.now(), seq: this.seq, completed: this.completed, simTime: this.sim.time, skillUse: this.skillUse, history: this.history,
         tasks: [...this.tasks.values()], deliverables: [...this.deliverables.values()], comms: this.comms.slice(-300), log: this.log.slice(-400), agents,
-        llmTotals: this.llm.totals, budgetCap: this.budgetCap, clients: [...this.clients.values()],
+        llmTotals: this.llm.totals, budgetCap: this.budgetCap, clients: [...this.clients.values()], hires: [...this.hires.values()], settings: { collab: this.collab, hiringMode: this.hiringMode },
       };
       const tmp = path.join(this.dataDir, 'state.json.tmp');
       fs.writeFileSync(tmp, JSON.stringify(data)); fs.renameSync(tmp, path.join(this.dataDir, 'state.json'));
@@ -622,6 +661,10 @@ export class Company extends EventEmitter {
       const d = JSON.parse(fs.readFileSync(file, 'utf8'));
       this.seq = { ...this.seq, ...d.seq }; this.completed = d.completed || 0; this.sim.time = d.simTime || 0;
       this.skillUse = d.skillUse || {}; this.history = d.history || [];
+      for (const h of d.hires || []) { if (!this.sim.agents.has(h.id) && this.sim.map.desks[h.room]?.[h.slot]) { this.sim.addAgent(h); this.hires.set(h.id, h); } }
+      if (d.settings?.collab && !process.env.COLLAB) this.collab = d.settings.collab;
+      if (d.settings?.hiringMode && !process.env.HIRING) this.hiringMode = d.settings.hiringMode;
+      this.kb.load();
       for (const t of d.tasks || []) {
         if (['planning', 'active', 'review', 'queued'].includes(t.status)) { t.status = 'interrupted'; t.error = 'Server restarted while this was running. Use Retry.'; t.subtasks.forEach((s) => { if (s.status === 'working' || s.status === 'ready') s.status = 'waiting'; }); }
         this.tasks.set(t.id, t);
@@ -648,3 +691,5 @@ function headlineOf(md) {
   }
   return clip((md.replace(/^#.*$/gm, '').replace(/[*`_>#]/g, '').replace(/\s+/g, ' ').trim()), 140);
 }
+
+Object.assign(Company.prototype, collab, hiring, learning);

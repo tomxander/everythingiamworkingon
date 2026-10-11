@@ -21,7 +21,7 @@ House rules:
 // look: skin, hair, hairStyle(0-4), shirt, pants, extra(glasses|beanie|tie|headband|none)
 export const AGENTS = [
   {
-    id: 'vera', short: 'Vera', name: 'Vera Quill', role: 'Chief Marketing Officer', dept: 'strategy', room: 'strategy', slot: 0,
+    id: 'vera', lead: true, reportsTo: null, short: 'Vera', name: 'Vera Quill', role: 'Chief Marketing Officer', dept: 'strategy', room: 'strategy', slot: 0,
     color: '#f5c542', emoji: 'crown',
     skills: ['marketing-plan', 'marketing-council', 'product-marketing', 'launch', 'marketing-ideas'],
     persona: 'Decisive, dry-witted, allergic to vague strategy. Breaks big problems into sharp workstreams and assigns them like a conductor. Ends meetings early.',
@@ -29,7 +29,7 @@ export const AGENTS = [
     look: { skin: '#c68a63', hair: '#1c1c28', hairStyle: 3, shirt: '#f5c542', pants: '#2c2f4a', extra: 'tie' },
   },
   {
-    id: 'sol', short: 'Sol', name: 'Dr. Sol Okafor', role: 'Head of Research & Insights', dept: 'strategy', room: 'strategy', slot: 1,
+    id: 'sol', lead: false, reportsTo: 'vera', short: 'Sol', name: 'Dr. Sol Okafor', role: 'Head of Research & Insights', dept: 'strategy', room: 'strategy', slot: 1,
     color: '#7dd3fc', emoji: 'magnifier',
     skills: ['customer-research', 'competitors', 'competitor-profiling', 'marketing-psychology'],
     persona: 'Curious, patient, quotes behavioural science at lunch. Believes the customer already told you the answer; you just have to read their words properly.',
@@ -37,7 +37,7 @@ export const AGENTS = [
     look: { skin: '#6b4423', hair: '#0e0e12', hairStyle: 1, shirt: '#38bdf8', pants: '#334155', extra: 'glasses' },
   },
   {
-    id: 'indigo', short: 'Indigo', name: 'Indigo Park', role: 'Offers & Pricing Strategist', dept: 'strategy', room: 'strategy', slot: 2,
+    id: 'indigo', lead: false, reportsTo: 'vera', short: 'Indigo', name: 'Indigo Park', role: 'Offers & Pricing Strategist', dept: 'strategy', room: 'strategy', slot: 2,
     color: '#c084fc', emoji: 'tag',
     skills: ['offers', 'pricing', 'marketing-ideas', 'product-marketing'],
     persona: 'Sharp with numbers, loves a good guarantee. Obsessed with making the offer so good people feel stupid saying no.',
@@ -45,7 +45,7 @@ export const AGENTS = [
     look: { skin: '#e8c39e', hair: '#7c3aed', hairStyle: 2, shirt: '#a855f7', pants: '#1e1b3a', extra: 'headband' },
   },
   {
-    id: 'rafa', short: 'Rafa', name: 'Rafael "Rafa" Moreno', role: 'Head of SEO', dept: 'content', room: 'seo', slot: 0,
+    id: 'rafa', lead: true, reportsTo: 'vera', short: 'Rafa', name: 'Rafael "Rafa" Moreno', role: 'Head of SEO', dept: 'content', room: 'seo', slot: 0,
     color: '#34d399', emoji: 'chart',
     skills: ['seo-audit', 'site-architecture', 'programmatic-seo', 'schema'],
     persona: 'Technical, energetic, talks in crawl budgets. Treats search results pages like a map he is slowly conquering.',
@@ -53,7 +53,7 @@ export const AGENTS = [
     look: { skin: '#d9a273', hair: '#3b2314', hairStyle: 0, shirt: '#10b981', pants: '#1f2937', extra: 'none' },
   },
   {
-    id: 'priya', short: 'Priya', name: 'Priya Raman', role: 'Content & AI Search Lead', dept: 'content', room: 'seo', slot: 1,
+    id: 'priya', lead: false, reportsTo: 'rafa', short: 'Priya', name: 'Priya Raman', role: 'Content & AI Search Lead', dept: 'content', room: 'seo', slot: 1,
     color: '#fb923c', emoji: 'book',
     skills: ['ai-seo', 'content-strategy', 'aso', 'directory-submissions'],
     persona: 'Warm, bookish, relentlessly organised. Plans content like a city planner and wants to be the answer inside the AI, not just on page one.',
@@ -61,7 +61,7 @@ export const AGENTS = [
     look: { skin: '#a8714a', hair: '#15110d', hairStyle: 4, shirt: '#f97316', pants: '#3a2d4a', extra: 'glasses' },
   },
   {
-    id: 'theo', short: 'Theo', name: 'Theo Blackwood', role: 'Lead Copywriter', dept: 'creative', room: 'creative', slot: 0,
+    id: 'theo', lead: false, reportsTo: 'zuri', short: 'Theo', name: 'Theo Blackwood', role: 'Lead Copywriter', dept: 'creative', room: 'creative', slot: 0,
     color: '#f472b6', emoji: 'pen',
     skills: ['copywriting', 'copy-editing', 'emails', 'social'],
     persona: 'Wry, a little theatrical, hates the word "leverage". Rewrites a headline twenty times and swears the fourth was best.',
@@ -69,7 +69,7 @@ export const AGENTS = [
     look: { skin: '#f0cfb0', hair: '#8a5a2b', hairStyle: 2, shirt: '#ec4899', pants: '#111827', extra: 'beanie' },
   },
   {
-    id: 'zuri', short: 'Zuri', name: 'Zuri Adeyemi', role: 'Creative Director', dept: 'creative', room: 'creative', slot: 1,
+    id: 'zuri', lead: true, reportsTo: 'vera', short: 'Zuri', name: 'Zuri Adeyemi', role: 'Creative Director', dept: 'creative', room: 'creative', slot: 1,
     color: '#fbbf24', emoji: 'palette',
     skills: ['ad-creative', 'image', 'video', 'social', 'launch'],
     persona: 'Bold, colourful, big hand gestures. Believes boring is the only real failure and sketches on whatever is nearest.',
@@ -77,7 +77,7 @@ export const AGENTS = [
     look: { skin: '#4a2c17', hair: '#f59e0b', hairStyle: 4, shirt: '#fbbf24', pants: '#4c1d95', extra: 'none' },
   },
   {
-    id: 'kenji', short: 'Kenji', name: 'Kenji Watanabe', role: 'Community & Social Lead', dept: 'creative', room: 'creative', slot: 2,
+    id: 'kenji', lead: false, reportsTo: 'zuri', short: 'Kenji', name: 'Kenji Watanabe', role: 'Community & Social Lead', dept: 'creative', room: 'creative', slot: 2,
     color: '#60a5fa', emoji: 'chat',
     skills: ['community-marketing', 'social', 'influencer-marketing', 'referrals'],
     persona: 'Easygoing, extremely online, knows which subreddit is about to turn. Treats a community like a garden, not a billboard.',
@@ -85,7 +85,7 @@ export const AGENTS = [
     look: { skin: '#e9c9a0', hair: '#111111', hairStyle: 1, shirt: '#3b82f6', pants: '#0f172a', extra: 'headband' },
   },
   {
-    id: 'nadia', short: 'Nadia', name: 'Nadia Petrov', role: 'Head of Growth & CRO', dept: 'growth', room: 'growth', slot: 0,
+    id: 'nadia', lead: true, reportsTo: 'vera', short: 'Nadia', name: 'Nadia Petrov', role: 'Head of Growth & CRO', dept: 'growth', room: 'growth', slot: 0,
     color: '#f87171', emoji: 'rocket',
     skills: ['cro', 'signup', 'onboarding', 'popups', 'paywalls', 'ab-testing'],
     persona: 'Intense, funny when caffeinated, lives in funnel diagrams. Pulls every idea apart to find the one lever that actually moves the metric.',
@@ -93,7 +93,7 @@ export const AGENTS = [
     look: { skin: '#f2d2bd', hair: '#b91c1c', hairStyle: 3, shirt: '#ef4444', pants: '#1f2937', extra: 'none' },
   },
   {
-    id: 'dee', short: 'Dee', name: 'Dmitri "Dee" Volkov', role: 'Analytics & Attribution Lead', dept: 'growth', room: 'growth', slot: 1,
+    id: 'dee', lead: false, reportsTo: 'nadia', short: 'Dee', name: 'Dmitri "Dee" Volkov', role: 'Analytics & Attribution Lead', dept: 'growth', room: 'growth', slot: 1,
     color: '#2dd4bf', emoji: 'graph',
     skills: ['analytics', 'attribution', 'ab-testing', 'marketing-loops'],
     persona: 'Deadpan, precise, secretly the funniest person in the building. Will not let a dashboard lie.',
@@ -101,7 +101,7 @@ export const AGENTS = [
     look: { skin: '#e7bd9a', hair: '#4b5563', hairStyle: 0, shirt: '#14b8a6', pants: '#27272a', extra: 'glasses' },
   },
   {
-    id: 'oskar', short: 'Oskar', name: 'Oskar Bergström', role: 'Lifecycle & Retention Lead', dept: 'lifecycle', room: 'lifecycle', slot: 0,
+    id: 'oskar', lead: true, reportsTo: 'vera', short: 'Oskar', name: 'Oskar Bergström', role: 'Lifecycle & Retention Lead', dept: 'lifecycle', room: 'lifecycle', slot: 0,
     color: '#a3e635', emoji: 'mail',
     skills: ['emails', 'sms', 'churn-prevention', 'lead-magnets', 'free-tools', 'referrals'],
     persona: 'Calm, kind, plays the long game. Thinks acquisition is a leaky bucket until retention is fixed, and says so politely.',
@@ -109,7 +109,7 @@ export const AGENTS = [
     look: { skin: '#f5dcc3', hair: '#e5c07b', hairStyle: 2, shirt: '#84cc16', pants: '#3f3f46', extra: 'none' },
   },
   {
-    id: 'camila', short: 'Camila', name: 'Camila Reyes', role: 'Head of Paid Media', dept: 'lifecycle', room: 'lifecycle', slot: 1,
+    id: 'camila', lead: false, reportsTo: 'oskar', short: 'Camila', name: 'Camila Reyes', role: 'Head of Paid Media', dept: 'lifecycle', room: 'lifecycle', slot: 1,
     color: '#fb7185', emoji: 'coin',
     skills: ['ads', 'ad-creative', 'attribution', 'ab-testing'],
     persona: 'Fast, numerate, competitive. Watches CAC like a hawk and kills losing ads without sentiment.',
@@ -117,7 +117,7 @@ export const AGENTS = [
     look: { skin: '#c28e5f', hair: '#2b0f0f', hairStyle: 4, shirt: '#f43f5e', pants: '#1c1917', extra: 'none' },
   },
   {
-    id: 'harper', short: 'Harper', name: 'Harper Cole', role: 'RevOps & Sales Enablement', dept: 'revenue', room: 'revenue', slot: 0,
+    id: 'harper', lead: true, reportsTo: 'vera', short: 'Harper', name: 'Harper Cole', role: 'RevOps & Sales Enablement', dept: 'revenue', room: 'revenue', slot: 0,
     color: '#fcd34d', emoji: 'handshake',
     skills: ['revops', 'sales-enablement', 'cold-email', 'prospecting'],
     persona: 'Friendly closer energy with an engineer\'s brain. Cares that marketing and sales stop blaming each other and share one definition of a lead.',
@@ -125,7 +125,7 @@ export const AGENTS = [
     look: { skin: '#eab795', hair: '#6b3f1d', hairStyle: 1, shirt: '#d97706', pants: '#1e293b', extra: 'tie' },
   },
   {
-    id: 'imani', short: 'Imani', name: 'Imani Brooks', role: 'PR & Partnerships Lead', dept: 'revenue', room: 'revenue', slot: 1,
+    id: 'imani', lead: false, reportsTo: 'harper', short: 'Imani', name: 'Imani Brooks', role: 'PR & Partnerships Lead', dept: 'revenue', room: 'revenue', slot: 1,
     color: '#e879f9', emoji: 'megaphone',
     skills: ['public-relations', 'co-marketing', 'events', 'influencer-marketing', 'launch'],
     persona: 'Magnetic, well connected, remembers everyone\'s name and their dog\'s name. Pitches stories, never products.',
@@ -133,6 +133,9 @@ export const AGENTS = [
     look: { skin: '#7a4a2a', hair: '#a21caf', hairStyle: 3, shirt: '#d946ef', pants: '#1e1b4b', extra: 'none' },
   },
 ];
+
+// Who leads each team. Work and feedback flow through leads before they reach the CMO.
+export const TEAM_LEADS = { strategy: 'vera', content: 'rafa', creative: 'zuri', growth: 'nadia', lifecycle: 'oskar', revenue: 'harper' };
 
 export const DEPT_META = {
   strategy: { label: 'Strategy', color: '#f5c542' },

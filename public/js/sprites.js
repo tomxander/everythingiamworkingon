@@ -229,6 +229,7 @@ export const FLOORS = {
   vault: ['#1c2336', '#192032', '#2a3a5a'],
   hub: ['#d2cbb9', '#c6bfad', '#aaa391'],
   lounge: ['#7e6c8c', '#766584', '#5f4f6b'],
+  annex: ['#52657d', '#4a5c73', '#3a4a5f'],
   door: ['#4a4f5c', '#454a56', '#363a45'],
 };
 

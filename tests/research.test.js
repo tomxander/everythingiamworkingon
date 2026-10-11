@@ -29,6 +29,14 @@ const api = http.createServer((req, res) => {
     const lastUser = msgs.at(-1);
     const send = (text, extra = {}) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ content: [{ type: 'text', text }], usage: { input_tokens: 800, output_tokens: 150 }, stop_reason: 'end_turn', ...extra })); };
     if (/HANG/.test(first)) return; // never answers
+    // team-conversation prompts: answer them plainly so they never get mistaken for work calls
+    if (/Open the meeting in 3 to 5 sentences/.test(first)) return send('Team, here is the plan. Owners, confirm.');
+    if (/Give your approach, anything you need from a named teammate/.test(first)) return send('I will do my part and need nothing urgent. Risk: the baseline.');
+    if (/Write the handoff/.test(first)) return send('Heads up: see the headline findings. I assumed the brief.');
+    if (/Find REAL conflicts/.test(first)) return send('{"conflicts":[]}');
+    if (/reflecting on work you just finished/.test(system)) return send('{"lessons":[]}');
+    if (/leading the retrospective/.test(system)) return send('{"wentWell":["ok"],"wentWrong":[],"lessons":[],"rules":[]}');
+    if (/finalising a hire/.test(system)) return send('{"first":"Test","last":"Hire","persona":"A careful specialist.","quirks":["Check it."]}');
     if (/Reply with JSON only:\n\{"objective"/.test(first)) return send(JSON.stringify({ objective: 'Increase qualified quote requests from the Acme Cables website', goalType: 'leadgen', metric: 'Quote requests per month', target: '40 per month', timeframe: '90 days', budget: 'Not specified', audience: 'OEM buyers', constraints: ['No site access'], assumptions: ['Baseline unknown'], openQuestions: ['What is the current monthly quote volume?'] }));
     if (/Reply with JSON only/.test(first) && /steps/.test(first)) return send(JSON.stringify({ summary: 'Fix the lead path then measure it.', steps: [{ agent: 'rafa', skill: 'seo-audit', instruction: 'Audit the key pages.', deps: [] }, { agent: 'theo', skill: 'copywriting', instruction: 'Rewrite the hero.', deps: [] }] }));
     if (/Build the client profile/.test(first)) return send('# Client profile: Acme\n\n- Offers custom cable assemblies (see /).\n\n## Not verified\n- Traffic, conversion.');
@@ -38,8 +46,8 @@ const api = http.createServer((req, res) => {
     if (/Here is your deliverable and a reviewer/.test(first)) return send('# SEO audit (revised)\n\n## Assumptions\n- Pages read.\n\n1. The contact form at ' + SITE + '/contact has 6 fields; cut to 3.\n\n## Next actions\n- Ship it. This revised version is intentionally long enough to replace the draft because it is longer than half of the original draft text. '.repeat(3));
     // work calls
     if (/You were cut off/.test(typeof lastUser.content === 'string' ? lastUser.content : '')) return send(' PART2 end.');
-    if (/Rewrite the hero/.test(first) && !state.continued) { state.continued = true; return send('# Hero copy\n\nPART1 start', { stop_reason: 'max_tokens' }); }
-    if (/Audit the key pages/.test(first)) {
+    if (/Rewrite the hero/.test(first) && /Rules for this deliverable/.test(first) && !state.continued) { state.continued = true; return send('# Hero copy\n\nPART1 start', { stop_reason: 'max_tokens' }); }
+    if (/Audit the key pages/.test(first) && /Rules for this deliverable/.test(first)) {
       const hasResult = Array.isArray(lastUser.content) && lastUser.content.some((c) => c.type === 'tool_result');
       if (!hasResult) { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ content: [{ type: 'text', text: 'Let me read the contact page.' }, { type: 'tool_use', id: 'tu_1', name: 'fetch_url', input: { url: `${SITE}/contact` } }], usage: { input_tokens: 800, output_tokens: 60 }, stop_reason: 'tool_use' })); }
       const got = lastUser.content[0].content;
@@ -106,7 +114,7 @@ test('live: intake, profile, tool use, truncation recovery and review-driven rev
   assert.match(w.company.clients.get('127.0.0.1').profile, /Not verified/);
 
   // the worker prompts carry the shared context and rules
-  const rafaCalls = seen.filter((b) => /Audit the key pages/.test(String(b.messages[0].content)));
+  const rafaCalls = seen.filter((b) => /Audit the key pages/.test(String(b.messages[0].content)) && /Rules for this deliverable/.test(String(b.messages[0].content)));
   assert.ok(rafaCalls.length >= 2, 'tool loop made a follow-up call');
   const sys = rafaCalls[0].system.map((x) => x.text).join('');
   assert.match(sys, /Client context/); assert.match(sys, /Quote requests per month/); assert.match(sys, /Sources read for 127\.0\.0\.1/);

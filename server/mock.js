@@ -227,6 +227,44 @@ export function mockComplete(kind, ctx) {
       const plan = planFromPlaybooks(ctx.title, ctx.brief, 7, ctx.intake?.playbook);
       return { text: JSON.stringify(plan), latencyMs: 2500 };
     }
+    case 'kickoff_brief': {
+      const st = ctx.steps || []; const i = ctx.intake || {};
+      const who = st.map((x) => `${x.short} takes ${x.skill}${x.deps.length ? ` after ${x.deps.join(' and ')}` : ''}`).join('; ');
+      const risk = (i.assumptions || []).find((a) => /baseline|target/i.test(a)) ? 'We have no baseline, so measurement has to go in first' : 'Handoffs are where this slips, so say early what you need';
+      return { text: `Team, here is the picture. ${i.objective || ctx.title}. We will judge it on ${String(i.metric || 'one metric').toLowerCase()}. ${who}. Biggest risk: ${risk}. Owners, confirm and tell me what you need from each other.`, latencyMs: 2200 };
+    }
+    case 'kickoff_reply': {
+      const a = ctx.agent || {}; const as = ctx.assignment || {};
+      const first = String(as.instruction || '').split(/[.;]/)[0].replace(/^(Audit|Write|Build|Design|Plan|Define|Specify|Rewrite|Assess|Map|Find|Develop|Identify|Shortlist|Produce|Recommend|Review|Outline|Edit|Pick|Mine|Gather|Synthesize|Shape|Make)\b/, (m) => m.toLowerCase());
+      const needs = (ctx.needsFrom || []).length ? `I need ${ctx.needsFrom.join(' and ')}'s output before I finalise.` : 'I can start straight away.';
+      const feeds = (ctx.feedsInto || []).length ? ` ${ctx.feedsInto.join(' and ')}: you will get my headline findings first.` : '';
+      const lead = ctx.leadNote && ctx.leadNote.short !== 'Vera' ? `${ctx.leadNote.short}, understood. ` : '';
+      const risk = ctx.risk ? ` Risk: ${ctx.risk}.` : '';
+      return { text: `${lead}I will ${first}. ${needs}${feeds}${risk}`.replace(/\s+/g, ' ').trim(), latencyMs: 900 };
+    }
+    case 'handoff': {
+      const h = String(ctx.headline || 'the main findings are in the deliverable').replace(/[.]+$/, '');
+      const asm = ctx.assumption ? String(ctx.assumption).replace(/[.]+$/, '') : null;
+      return { text: `${ctx.to.short}, the headline from my ${ctx.fromSkill}: ${h}. ${asm ? `One assumption to check: ${asm.charAt(0).toLowerCase()}${asm.slice(1)}.` : 'I worked from the brief as written.'} Tell me if that breaks your ${ctx.toSkill}.`, latencyMs: 800 };
+    }
+    case 'align': {
+      const have = new Set((ctx.subs || []).map((x) => `${x.agent}:${x.skill}`));
+      const out = ALIGN_RULES.filter((r) => r.pair.every((k) => have.has(k))).slice(0, 2).map((r) => ({ rule: r.id, agents: r.pair.map((k) => k.split(':')[0]), issue: r.issue, question: r.question }));
+      return { text: JSON.stringify({ conflicts: out }), latencyMs: 1800 };
+    }
+    case 'align_reply': { const r = ALIGN_RULES.find((x) => x.id === ctx.rule); const side = ctx.side === 1 ? 1 : 0; return { text: r ? r.positions[side] : 'I can flex on timing but not on measurement.', latencyMs: 800 }; }
+    case 'decision': { const r = ALIGN_RULES.find((x) => x.id === ctx.rule); return { text: r ? r.decision : 'We sequence the changes and measure each one.', latencyMs: 900 }; }
+    case 'escalate_reply': return { text: ctx.retry ? `Understood. Retry once with a tighter scope, and tell me if the same thing happens (${String(ctx.error || '').slice(0, 80)}).` : `Proceed without it. I will flag the gap in the summary so God knows it is missing.`, latencyMs: 700 };
+    case 'reflect': {
+      const out = []; const r = ctx.review || {};
+      if (r.improvement) out.push({ scope: 'agent', text: `${ctx.skillTitle || 'In this skill'}: ${String(r.improvement).replace(/[.]+$/, '')}.`, tags: ['review'] });
+      if (r.verdict === 'approve' && r.strength && !r.improvement) out.push({ scope: 'agent', text: `Keep doing this: ${String(r.strength).replace(/[.]+$/, '')}.`, tags: ['strength'] });
+      return { text: JSON.stringify({ lessons: out }), latencyMs: 700 };
+    }
+    case 'retro': return { text: JSON.stringify(ctx.retro || { wentWell: [], wentWrong: [], lessons: [], rules: [] }), latencyMs: 2500 };
+    case 'hire': return { text: JSON.stringify(ctx.profile), latencyMs: 1500 };
+    case 'consolidate': return { text: (ctx.lessons || []).map((l) => `- ${l}`).join('\n'), latencyMs: 1200 };
+    case 'study': return { text: JSON.stringify({ lessons: [] }), latencyMs: 500 };
     case 'intake': return { text: JSON.stringify(ctx.intake), latencyMs: 2500 };
     case 'profile': return { text: ctx.snapshot?.pages?.length ? heuristicProfile(ctx.snapshot, ctx.brief) : '# Client profile\n\nNo pages could be read.', latencyMs: 3500 };
     case 'chat': {
@@ -254,24 +292,39 @@ export function mockComplete(kind, ctx) {
       return { text: pick(as, seed >> 3), latencyMs: 800 };
     }
     case 'review': {
-      const rs = [
-        ['Strong spine and specific recommendations.', 'Tighten the opening and state the metric explicitly.'],
-        ['Clear, shippable structure.', 'Pull the second recommendation forward.'],
-        ['Specific and well scoped.', 'Add one more proof point before this goes to the client.'],
-        ['Right direction and good prioritisation.', 'Trim the assumptions list.'],
-      ];
-      const [strength, improvement] = pick(rs, seed);
+      // simulated reviewers still read the deliverable: every comment below comes from checking it
+      const md = String(ctx.markdown || '');
+      const sec = (name) => (md.match(new RegExp(`## ${name}\\n([\\s\\S]*?)(?:\\n## |$)`)) || [])[1] || '';
+      const assumptions = sec('Assumptions').split('\n').filter((l) => /^\s*[-*]/.test(l)).length;
+      const recs = sec('Recommendations'); const next = sec('Next actions');
+      const strengths = [];
+      if (/## Evidence from the site/.test(md)) strengths.push('Grounded in real pages from the client\'s own site.');
+      if (/## Web research/.test(md) && !/Web search was not available/.test(md)) strengths.push('Backed by a live web search, with the sources listed.');
+      if (/## Team input considered/.test(md)) strengths.push('Builds on what teammates said instead of starting cold.');
+      if (/## Lessons applied/.test(md)) strengths.push('Applies lessons the team has already learned.');
+      strengths.push('Clear structure with concrete recommendations.');
+      const fixes = [];
+      if (assumptions > 3) fixes.push('Cut the assumptions to the three that would change the recommendation.');
+      if (recs && !/\d/.test(recs)) fixes.push('Put a number or threshold on each recommendation so success can be checked.');
+      if (next && !/\b(by|within|day|week|friday|monday)\b/i.test(next)) fixes.push('Give every next action an owner and a date.');
+      if (recs && (recs.match(/^\s*\d+\./gm) || []).length < 3) fixes.push('Offer a second option and say why it was rejected.');
+      if (!/Not verified|could not be verified|not verified/i.test(md)) fixes.push('Say what could not be verified from outside the company, and how to check it.');
+      if (/Web search was not available/.test(md)) fixes.push('Re-run the research once search is available and cite what it finds.');
+      const strength = pick(strengths, seed); const improvement = fixes.length ? pick(fixes, seed >> 2) : null;
       return { text: JSON.stringify({ verdict: 'approve', strength, improvement }), latencyMs: 900 };
     }
     case 'synth': {
       const parts = (ctx.outputs || []).map((o) => `- **${o.agentName}** (${o.skill}): ${o.headline}`).join('\n');
-      const text = `# Executive summary: ${topicOf(ctx)}\n\n> SIMULATED OUTPUT. Add an Anthropic API key and switch to Live for real analysis.\n\n## The call\nRun this as one coordinated push. Research first, offer second, copy and channels third, measurement alongside all of it.\n\n## What the team produced\n${parts}\n\n${(ctx.intake?.openQuestions || []).length ? `## Open questions for God\n${ctx.intake.openQuestions.map((q) => `- ${q}`).join('\n')}\n\n` : ''}## Decisions for God\n1. Approve the offer and positioning direction.\n2. Choose the single north-star metric (our pick: qualified conversions per week).\n3. Release budget for the first two-week test.\n\n## Next 7 days\n- Day 1-2: lock research and offer.\n- Day 3-4: copy and creative to draft.\n- Day 5: measurement live, QA.\n- Day 6-7: soft launch to 10% of traffic and review.\n\n## How we'll know it worked\nA 20% lift in qualified conversions against the 4-week baseline, with CAC at or below target.`;
+      const text = `# Executive summary: ${topicOf(ctx)}\n\n> SIMULATED OUTPUT. Add an Anthropic API key and switch to Live for real analysis.\n\n## The call\nRun this as one coordinated push. Research first, offer second, copy and channels third, measurement alongside all of it.\n\n${(ctx.decisions || []).length ? `## Decisions made along the way\n${ctx.decisions.map((d) => `- ${d.decision}`).join('\n')}\n\n` : ''}## What the team produced\n${parts}\n\n${(ctx.intake?.openQuestions || []).length ? `## Open questions for God\n${ctx.intake.openQuestions.map((q) => `- ${q}`).join('\n')}\n\n` : ''}## Decisions for God\n1. Approve the offer and positioning direction.\n2. Choose the single north-star metric (our pick: qualified conversions per week).\n3. Release budget for the first two-week test.\n\n## Next 7 days\n- Day 1-2: lock research and offer.\n- Day 3-4: copy and creative to draft.\n- Day 5: measurement live, QA.\n- Day 6-7: soft launch to 10% of traffic and review.\n\n## How we'll know it worked\nA 20% lift in qualified conversions against the 4-week baseline, with CAC at or below target.`;
       return { text, latencyMs: 3500 };
     }
     case 'work':
     default: {
       const { agent, skill, instruction } = ctx;
       const topic = (ctx.intake?.objective || topicOf(ctx)).replace(/[.:]+$/, '');
+      // simulated agents act on the lessons they were given, so the learning loop is real even without a model
+      const L = (ctx.lessons || []).join(' ').toLowerCase();
+      const act = { trim: /assumptions to the three/.test(L), numbers: /number or threshold/.test(L), alt: /second option/.test(L), unverified: /could not be verified/.test(L) };
       const acts = (BANK[skill?.name] || ['Define the objective, pick one metric, and ship a small test this week.', 'Document what you learn so the next brief starts smarter.'])
         .map((a) => a.replaceAll('{topic}', topic));
       const heads = skill ? headingsOf(skill.body, 5) : [];
@@ -280,6 +333,9 @@ export function mockComplete(kind, ctx) {
         ...(ctx.intake ? ctx.intake.assumptions.slice(0, 3) : [`The brief is the source of truth: "${(ctx.brief || '').slice(0, 110).replace(/\s+/g, ' ')}${(ctx.brief || '').length > 110 ? '...' : ''}"`, 'Budget, timing and brand constraints are as stated; anything missing is flagged below.']),
         prior.length ? `Builds on the work of ${prior.map((p) => p.agentShort).join(', ')}` : 'No upstream work yet; this is the first pass.',
       ];
+      let assumptionList = assumptions; if (act.trim) assumptionList = assumptions.slice(0, 3);
+      const recLines = acts.map((a, i) => `${i + 1}. ${a}${act.numbers ? ' Success check: review at day 14 against the baseline.' : ''}`);
+      if (act.alt) recLines.push(`${recLines.length + 1}. Alternative considered: run the smaller version first and expand only if the day-14 check passes.`);
       const text = `# ${skill?.title || 'Deliverable'}: ${topic}
 
 > SIMULATED OUTPUT (${agent.name}, ${agent.role}). Structure follows the \`${skill?.name}\` skill. Switch to Live mode for real, brief-specific work.
@@ -287,18 +343,18 @@ export function mockComplete(kind, ctx) {
 **Task:** ${instruction}
 
 ## Assumptions
-${bullet(assumptions)}
+${bullet(assumptionList)}
 
-${ctx.snapshot?.pages?.length ? `## Evidence from the site\n${bullet(siteEvidence(ctx.snapshot))}\n\n` : ''}## Framework this skill applies
+${ctx.snapshot?.pages?.length ? `## Evidence from the site\n${bullet(siteEvidence(ctx.snapshot))}\n\n` : ''}${ctx.web ? `## Web research (live search)\n${ctx.web.error ? `- Web search was not available (${ctx.web.error}), so nothing here is verified against outside sources.` : bullet(ctx.web.results.map((r) => `${r.title}: ${r.url}${r.snippet ? ` (${r.snippet.slice(0, 110)})` : ''}`))}\n\n` : ''}${ctx.thread?.length ? `## Team input considered\n${bullet(ctx.thread.map((m) => `${m.kind}${m.from ? ` from ${m.from}` : ''}: ${String(m.text).slice(0, 170)}`))}\n\n` : ''}${ctx.lessons?.length ? `## Lessons applied from past work\n${bullet(ctx.lessons)}\n\n` : ''}## Framework this skill applies
 ${heads.length ? bullet(heads.map((h) => `${h}`)) : '- (framework from the skill library)'}
 
 ## Recommendations
-${acts.map((a, i) => `${i + 1}. ${a}`).join('\n')}
+${recLines.join('\n')}
 
 ## Next actions
 ${bullet([`${agent.short}: finalise the first draft within 2 days.`, 'Theo: copy pass once the direction is approved.', 'Dee: confirm tracking is in place before anything goes live.'])}
 
-## How we'll know it worked
+${act.unverified ? '## Not verified\n- Traffic, conversion rate and lead quality are not visible from outside the company. Check them in the client\'s analytics before acting on these numbers.\n\n' : ''}## How we'll know it worked
 Pick one leading metric for this workstream, set the threshold before launch, and review at day 14.`;
       const words = text.split(/\s+/).length;
       return { text, latencyMs: 4000 + Math.min(9000, words * 22), headline: acts[0] };
@@ -407,4 +463,64 @@ ${siteFindings(snapshot).map((f) => `- ${f}`).join('\n') || '- none'}
 
 ## Not verified from outside the company
 - Traffic volume and sources, current conversion rate, lead quality, sales process and CRM, budget, ideal customer profile and competitors.${brief ? `\n\n## Brief\n${brief.slice(0, 600)}` : ''}`;
+}
+
+
+// ---------------------------------------------------------------- real conflicts between workstreams (simulated mode)
+// These fire only when the two workstreams really are on the plan, because that is when the conflict is real.
+export const ALIGN_RULES = [
+  { id: 'hero-test', pair: ['nadia:cro', 'theo:copywriting'], issue: 'The hero rewrite and the CRO test both change the same part of the homepage, so shipping both at once would confound the result.', question: 'How do we ship the new hero and still learn what worked?',
+    positions: ['I need a clean control to measure lift, so the new hero has to run as a variant against the current one, not replace it.', 'The current hero is weak and I would rather ship the rewrite site-wide, but I can supply two variants if a test is what you need.'],
+    decision: 'Ship the rewrite as variant B against the current hero. Nadia owns the test design and the stopping rule, Theo delivers two variants first, and nothing else on the page changes during the test.' },
+  { id: 'utm-standard', pair: ['camila:ads', 'dee:analytics'], issue: 'The paid plan and the analytics plan define lead sources and UTM naming differently.', question: 'Which naming and attribution convention does the whole team use?',
+    positions: ['I need campaign names I can optimise on inside the ad platforms, and I would rather not rename them for reporting.', 'One convention, defined once, or lead sources will not reconcile in the CRM. I will publish the UTM sheet today.'],
+    decision: 'Dee\'s UTM convention is the standard. Camila builds every campaign to it from day one, and Dee audits the first week of data for gaps.' },
+  { id: 'seo-copy', pair: ['rafa:seo-audit', 'theo:copywriting'], issue: 'The SEO audit sets title and heading constraints that the new homepage copy may break.', question: 'Where does creative freedom end and keyword discipline begin?',
+    positions: ['The H1 and title carry the target term. Everything else can move, but those two cannot.', 'I can keep the target term in the H1 and put the personality in the subhead and body.'],
+    decision: 'Rafa\'s keyword list is fixed for the title and H1. Theo has full creative freedom everywhere else, and Rafa signs off the final headings.' },
+  { id: 'budget-offer', pair: ['camila:ads', 'indigo:offers'], issue: 'The paid test assumes an offer that the offer workstream is still redefining.', question: 'Do we test the current offer or the new one?',
+    positions: ['I need the offer locked before I build creative, or I burn budget testing something we will change.', 'The new offer is stronger but untested, so I would run the old one as the control.'],
+    decision: 'Lock the new offer by Wednesday. Camila tests it against the old offer as a control with a capped budget, and Indigo owns the go or no-go call.' },
+];
+
+// ---------------------------------------------------------------- who joins the team, from the actual brief (simulated mode)
+export const HIRE_ROLES = [
+  { key: 'automotive', domain: 'automotive', role: 'Automotive Industry Strategist', dept: 'strategy', skills: ['customer-research', 'competitors', 'product-marketing', 'marketing-psychology'], re: /\b(automotive|automaker|oem|tier-?1|adas|infotainment|vehicle|mobility|software-defined|connected car|ev charging)\b/i,
+    persona: 'Ex-industry, fluent in OEM procurement cycles, functional safety and programme timelines. Translates engineering buyers into marketing language without dumbing it down.', quirks: ['Who signs the RFQ, and who vetoes it?', 'Programme timelines are measured in years.', 'Engineers read the spec sheet before the headline.'],
+    step: ['customer-research', 'Write the domain brief for this industry: how buyers evaluate and buy, the jargon they use, what they distrust, the regulations and standards that matter, and what a credible proof point looks like to them. Everyone else will write and plan from it.'] },
+  { key: 'ecommerce', domain: 'ecommerce', role: 'E-commerce Growth Specialist', dept: 'growth', skills: ['cro', 'ads', 'emails', 'analytics'], re: /\b(shopify|e-?commerce|dtc|d2c|online store|cart|checkout|woocommerce)\b/i,
+    persona: 'Lives in cart-abandonment data. Knows what a 2% add-to-cart rate means and what to do about it.', quirks: ['What is the AOV?', 'Free shipping thresholds move baskets.', 'Mobile checkout is where it dies.'],
+    step: ['cro', 'Audit the store funnel from product page to paid order and list the three changes most likely to lift conversion.'] },
+  { key: 'video', domain: 'video', role: 'Video Producer', dept: 'creative', skills: ['video', 'social', 'ad-creative', 'image'], re: /\b(video|youtube|reels|tiktok|shorts|explainer|film)\b/i,
+    persona: 'Storyboards in the shower. Cuts for the first three seconds and the last five.', quirks: ['Hook, proof, ask.', 'Captions on, always.', 'Cut it again.'],
+    step: ['video', 'Storyboard the three short videos most likely to travel, with hooks, shot lists and captions.'] },
+  { key: 'events', domain: 'events', role: 'Events & Webinar Producer', dept: 'revenue', skills: ['events', 'co-marketing', 'public-relations', 'lead-magnets'], re: /\b(webinar|conference|trade ?show|expo|summit|event)\b/i,
+    persona: 'Runs events like launches: the follow-up plan is written before the invitations go out.', quirks: ['Where do the leads go the day after?', 'A speaker is a distribution channel.'],
+    step: ['events', 'Plan the event programme: format, speakers, promotion timeline and the lead follow-up sequence.'] },
+  { key: 'localization', domain: 'localization', role: 'Localization Lead', dept: 'content', skills: ['copywriting', 'copy-editing', 'seo-audit', 'site-architecture'], re: /\b(multilingual|locali[sz]ation|translate|international|global markets|hreflang|languages)\b/i,
+    persona: 'Knows that translation is the cheap part. Adapts offers, proof and search intent for each market.', quirks: ['Same words, different intent.', 'Currency and trust signals change by market.'],
+    step: ['site-architecture', 'Plan the multi-market site structure: languages, URLs, hreflang and which pages need adaptation rather than translation.'] },
+  { key: 'abm', domain: 'abm', role: 'Account-Based Marketing Lead', dept: 'revenue', skills: ['prospecting', 'cold-email', 'sales-enablement', 'revops'], re: /\b(abm|account-based|named accounts|enterprise accounts|target accounts)\b/i,
+    persona: 'Treats ten accounts as ten markets. Sales and marketing share one list under this person.', quirks: ['Who is on the buying committee?', 'One-to-one beats one-to-many.'],
+    step: ['prospecting', 'Define the target account list criteria, the buying committee map and the first-touch plan per tier.'] },
+];
+
+export function hireRulesFor(text, existingDomains = []) {
+  const out = [];
+  for (const r of HIRE_ROLES) if (r.re.test(text) && !existingDomains.includes(r.domain)) out.push(r);
+  return out.slice(0, 2);
+}
+
+const FIRST = ['Amara', 'Bastian', 'Chiara', 'Dev', 'Elio', 'Farah', 'Gustavo', 'Hana', 'Ibrahim', 'Jun', 'Katya', 'Lena', 'Mateo', 'Noor', 'Omar', 'Petra', 'Quinn', 'Rohan', 'Sana', 'Tariq', 'Uma', 'Viktor', 'Wen', 'Ximena', 'Yusuf', 'Zoe', 'Anika', 'Bruno', 'Cleo', 'Dario'];
+const LAST = ['Almeida', 'Brandt', 'Castellanos', 'Dubois', 'Eriksson', 'Fontaine', 'Gallagher', 'Hartmann', 'Ibarra', 'Jovanovic', 'Kowalski', 'Lindgren', 'Mbeki', 'Nakamura', 'Oyelaran', 'Paczek', 'Quispe', 'Rosales', 'Santoro', 'Tanaka', 'Uddin', 'Varga', 'Weiss', 'Xu', 'Yilmaz', 'Zielinski'];
+const SKINS = ['#f2d2bd', '#e8c39e', '#d9a273', '#c68a63', '#a8714a', '#6b4423', '#4a2c17'];
+const HAIRS = ['#0e0e12', '#3b2314', '#6b3f1d', '#8a5a2b', '#e5c07b', '#b91c1c', '#4b5563', '#7c3aed'];
+export function randomLook(seedStr, shirt) {
+  const h = Math.abs(hash(seedStr));
+  return { skin: SKINS[h % SKINS.length], hair: HAIRS[(h >> 3) % HAIRS.length], hairStyle: (h >> 5) % 5, shirt, pants: ['#1f2937', '#27272a', '#334155', '#1e1b3a', '#3f3f46'][(h >> 7) % 5], extra: ['none', 'glasses', 'none', 'headband', 'none', 'tie'][(h >> 9) % 6] };
+}
+export function pickName(seedStr, taken = new Set()) {
+  const h = Math.abs(hash(seedStr));
+  for (let i = 0; i < 60; i++) { const first = FIRST[(h + i * 7) % FIRST.length]; if (!taken.has(first.toLowerCase())) return { first, last: LAST[(h >> 4 + i) % LAST.length] || LAST[0] }; }
+  return { first: `Hire${h % 100}`, last: LAST[h % LAST.length] };
 }

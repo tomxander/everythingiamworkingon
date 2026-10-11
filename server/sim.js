@@ -16,20 +16,29 @@ export class Sim extends EventEmitter {
     this.agents = new Map();
     this.fx = []; // transient visual effects pushed to clients
     this.fxId = 1;
-    for (const a of roster) {
-      const d = map.desks[a.room][a.slot];
-      const agent = {
-        ...a, x: d.seat.x, y: d.seat.y, tx: d.seat.tx, ty: d.seat.ty, path: [], dir: 'up', pose: 'sit', desk: d,
-        speed: 2.6, bubble: null, emote: null, status: 'Settling in', energy: 80 + Math.random() * 20, mood: 70 + Math.random() * 25,
-        tok: { cancelled: false }, pending: new Set(), busy: false, lock: Promise.resolve(), memory: [],
-        stats: { tasks: 0, deliverables: 0, tokens: 0, words: 0, consults: 0 }, skillUse: {},
-      };
-      agent.tok.agent = agent;
-      this.agents.set(a.id, agent);
-    }
+    for (const a of roster) this.addAgent(a);
     // Pixel, the office dog
     const bed = map.spots.dogbed;
     this.dog = { x: bed.tx + 0.5, y: bed.ty + 0.5, path: [], dir: 'down', pose: 'sit', bubble: null, next: 4, speed: 3.2 };
+  }
+
+  /** Add a person to the office. With `spawn`, they appear at the annex door instead of their desk. */
+  addAgent(a, { spawn = null } = {}) {
+    const d = this.map.desks[a.room][a.slot];
+    const agent = {
+      ...a, x: spawn ? spawn.tx + 0.5 : d.seat.x, y: spawn ? spawn.ty + 0.5 : d.seat.y, tx: d.seat.tx, ty: d.seat.ty, path: [], dir: spawn ? 'down' : 'down', pose: spawn ? 'stand' : 'sit', desk: d,
+      speed: 2.6, bubble: null, emote: null, status: spawn ? 'First day' : 'Settling in', energy: 80 + Math.random() * 20, mood: 70 + Math.random() * 25,
+      tok: { cancelled: false }, pending: new Set(), busy: false, lock: Promise.resolve(), memory: [],
+      stats: { tasks: 0, deliverables: 0, tokens: 0, words: 0, consults: 0 }, skillUse: {},
+    };
+    agent.tok.agent = agent;
+    this.agents.set(a.id, agent);
+    return agent;
+  }
+
+  removeAgent(id) {
+    const a = this.agents.get(id); if (!a) return;
+    this.claim(a); a.tok.cancelled = true; this.agents.delete(id);
   }
 
   get clockMinutes() { return (START_MIN + (this.time / DAY_LEN) * 1440) % 1440; }

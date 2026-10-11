@@ -1,0 +1,222 @@
+// Growing the team. Vera, the team leads, and any agent mid-task can bring in a specialist when the
+// work needs expertise or capacity nobody has. Guardrails: a headcount cap, a per-task cap, a duplicate
+// check, an optional approval step for God, and a visible log. New hires get a desk in the Annex.
+import { COMPANY, DEPT_META, TEAM_LEADS } from './roster.js';
+import { bestSkill } from './skills.js';
+import { extractJson } from './llm.js';
+import { HIRE_ROLES, hireRulesFor, randomLook, pickName } from './mock.js';
+
+const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+const uniq = (a) => [...new Set(a)];
+const ANNEX_SLOTS = 16;
+
+export const hiring = {
+  publicAgent(a) {
+    return { id: a.id, short: a.short, name: a.name, role: a.role, dept: a.dept, room: a.room, color: a.color, emoji: a.emoji, skills: a.skills, persona: a.persona, quirks: a.quirks, look: a.look, lead: !!a.lead, reportsTo: a.reportsTo || null, hired: !!a.hired, domains: a.domains || [], joined: a.joined || null, why: a.why || null };
+  },
+
+  hiringStatus() {
+    const hired = [...this.sim.agents.values()].filter((a) => a.hired);
+    return { mode: this.hiringMode, headcount: this.sim.agents.size, maxHeadcount: this.hiringCaps.headcount, hired: hired.length, maxHires: this.hiringCaps.total, freeDesks: ANNEX_SLOTS - [...this.sim.agents.values()].filter((a) => a.room === 'annex').length, pending: this.pendingHires() };
+  },
+
+  existingDomains() { return uniq([...this.sim.agents.values()].flatMap((a) => a.domains || [])); },
+
+  load_of(id) {
+    let n = 0;
+    for (const t of this.tasks.values()) if (['planning', 'active', 'review', 'researching'].includes(t.status)) for (const s of t.subtasks) if (s.agent === id && ['waiting', 'ready', 'working'].includes(s.status)) n++;
+    return n;
+  },
+
+  /** Why this person is needed: returns null when a hire is justified, otherwise a reason it is not. */
+  hireObjection(spec, skills) {
+    const covering = [...this.sim.agents.values()].filter((x) => skills.every((k) => x.skills.includes(k)));
+    if (spec.domain && !this.existingDomains().includes(String(spec.domain).toLowerCase())) return null; // new domain knowledge is a legitimate reason
+    if (spec.capacity) return null;
+    if (!covering.length) return null;
+    if (covering.every((x) => this.load_of(x.id) >= 3)) return null; // everyone who can do it is swamped
+    const c = covering[0];
+    return `${c.name} (${c.role}) already covers ${skills.join(', ')} and has capacity. Ask them directly or assign the work to them.`;
+  },
+
+  async hire(task, spec, requesterId = 'vera') {
+    if (this.hiringMode === 'off') throw new Error('Hiring is switched off.');
+    const role = clip(String(spec.role || '').replace(/[<>`]/g, '').trim(), 60);
+    if (role.length < 4) throw new Error('A hire needs a clear job title.');
+    const skills = uniq((spec.skills || []).map(String).filter((s) => this.skills[s])).slice(0, 6);
+    if (!skills.length) throw new Error('Pick at least one skill from the library for this person to own.');
+    const hiredCount = [...this.sim.agents.values()].filter((a) => a.hired).length;
+    if (this.sim.agents.size >= this.hiringCaps.headcount) throw new Error(`Headcount is at the cap of ${this.hiringCaps.headcount}.`);
+    if (hiredCount >= this.hiringCaps.total) throw new Error(`The hiring limit of ${this.hiringCaps.total} people has been reached.`);
+    if (task && (task.hires?.length || 0) >= this.hiringCaps.perTask) throw new Error(`This task already brought in ${this.hiringCaps.perTask} people.`);
+    const taken = new Set([...this.sim.agents.values()].filter((a) => a.room === 'annex').map((a) => a.slot));
+    const slot = [...Array(ANNEX_SLOTS).keys()].find((i) => !taken.has(i));
+    if (slot === undefined) throw new Error('There are no free desks left in the Annex.');
+    const objection = this.hireObjection(spec, skills); if (objection) throw new Error(objection);
+    if (this.hiringMode === 'ask') await this.awaitHireApproval(task, { ...spec, role, skills }, requesterId);
+
+    const dept = spec.dept && DEPT_META[spec.dept] ? spec.dept : this.deptForSkills(skills);
+    const lead = this.agent(TEAM_LEADS[dept]) || this.agent('vera');
+    const profile = await this.makeProfile(task, { role, skills, why: spec.why, domain: spec.domain, dept, lead });
+    const seq = ++this.seq.hire; const first = profile.first;
+    const def = {
+      id: `h${seq}-${first.toLowerCase().replace(/[^a-z]/g, '').slice(0, 10) || 'new'}`, short: first, name: `${first} ${profile.last}`, role, dept, room: 'annex', slot, color: DEPT_META[dept].color, emoji: 'badge',
+      skills, persona: profile.persona, quirks: profile.quirks, look: randomLook(`${role}${seq}`, DEPT_META[dept].color), lead: false, reportsTo: lead.id, hired: true,
+      domains: spec.domain ? [String(spec.domain).toLowerCase().slice(0, 24)] : [], hiredFor: task?.id || null, why: clip(String(spec.why || ''), 240), joined: Date.now(), by: requesterId,
+    };
+    const agent = this.sim.addAgent(def, { spawn: this.sim.map.spots.annexdoor });
+    this.hires.set(def.id, def);
+    if (task) (task.hires ||= []).push(def.id);
+    this.emit('broadcast', { type: 'agent_added', agent: this.publicAgent(agent), hiring: this.hiringStatus() });
+    this.life?.loop(agent);
+    this.addLog(`${this.agent(requesterId)?.name || 'God'} hired ${def.name} as ${role}`, { type: 'system', agent: def.id, taskId: task?.id });
+    this.talk(task, { from: requesterId, to: 'all', kind: 'hire', text: `I'm bringing in ${def.name} as ${role}, reporting to ${lead.short}. Why: ${clip(String(spec.why || 'the work needs it'), 160)}` });
+    this.toast(`Hired ${def.name}, ${role}`, 'good');
+    await this.onboard(agent, task, lead);
+    return agent;
+  },
+
+  deptForSkills(skills) {
+    const tally = {};
+    for (const a of this.sim.agents.values()) for (const k of skills) if (a.skills.includes(k) && !a.hired) tally[a.dept] = (tally[a.dept] || 0) + 1;
+    return Object.entries(tally).sort((x, y) => y[1] - x[1])[0]?.[0] || 'strategy';
+  },
+
+  async makeProfile(task, { role, skills, why, domain, dept, lead }) {
+    const seed = `${role}|${domain || ''}|${this.seq.hire}`;
+    const taken = new Set([...this.sim.agents.values()].map((a) => a.short.toLowerCase()));
+    const nm = pickName(seed, taken);
+    const tpl = HIRE_ROLES.find((r) => r.domain === domain || r.role.toLowerCase() === role.toLowerCase());
+    const fallback = { first: nm.first, last: nm.last, persona: tpl?.persona || `${role}. Brings deep specialist knowledge${domain ? ` of ${domain}` : ''} and works closely with ${lead.short}. Prefers evidence to opinion and writes things down.`, quirks: tpl?.quirks || ['What does the evidence say?', 'Let me check that first.', 'Write it down so the next person can use it.'] };
+    try {
+      const res = await this.llm.complete({
+        kind: 'hire', maxTokens: 400,
+        system: this.personaSystem(this.agent('vera'), 'You are finalising a hire. Create a credible colleague profile.'),
+        user: `New role: ${role}\nSkills they will own: ${skills.join(', ')}\nWhy we need them: ${why}\nDomain: ${domain || 'general'}\nTeam: ${DEPT_META[dept].label}, reporting to ${lead.name}\nFirst names already taken: ${[...taken].join(', ')}\n\nReply with JSON only: {"first":"first name","last":"last name","persona":"2 sentences: how they work and what they care about","quirks":["three short things they often say"]}`,
+        ctx: { profile: fallback, title: role },
+      });
+      this.account(task || { tokens: 0, cost: 0 }, res);
+      const j = res.simulated ? null : extractJson(res.text);
+      if (j?.first && j?.last) {
+        const first = String(j.first).replace(/[^\p{L} '-]/gu, '').trim().slice(0, 20); const last = String(j.last).replace(/[^\p{L} '-]/gu, '').trim().slice(0, 24);
+        if (first && last && !taken.has(first.toLowerCase())) return { first, last, persona: clip(String(j.persona || fallback.persona), 300), quirks: (Array.isArray(j.quirks) ? j.quirks : fallback.quirks).map((q) => clip(String(q), 80)).slice(0, 4) };
+      }
+    } catch { /* template profile */ }
+    return fallback;
+  },
+
+  async onboard(agent, task, lead) {
+    const sim = this.sim; const vera = this.agent('vera');
+    await this.withAgent(agent, async (tok) => {
+      sim.setStatus(agent, 'First day');
+      await sim.goTo(agent, sim.map.spots.welcome, { tok });
+      sim.say(vera, `Welcome, ${agent.short}. You report to ${lead.short}.`, 4); sim.say(lead, `Glad you're here, ${agent.short}. Read the team notes first.`, 4);
+      sim.emoteFor(agent, 'heart', 3); agent.mood = Math.min(100, agent.mood + 15);
+      await this.sleepSim(3.5, tok);
+      await sim.goTo(agent, agent.desk.seat, { pose: 'sit', tok });
+      agent.memory.push({ t: Math.round(sim.time), text: `Joined 4EVR as ${agent.role}. ${agent.why ? `Why: ${clip(agent.why, 100)}` : ''}`.trim() });
+      agent.pose = 'type';
+    });
+  },
+
+  /** Add a workstream to a running task (used when someone is hired mid-task). */
+  addDynamicSubtask(task, agentId, skill, instruction, requestedBy) {
+    const n = task.subtasks.length;
+    const sub = { id: `${task.id}.${n + 1}`, idx: n, agent: agentId, skill, instruction: clip(String(instruction || 'Contribute your expertise to this task.'), 500), deps: [], consult: null, status: 'waiting', outputId: null, started: null, ended: null, headline: null, review: null, addedBy: requestedBy };
+    task.subtasks.push(sub); this.pushTask(task); this.schedulers.get(task.id)?.();
+    return sub;
+  },
+
+  async toolHire(a, task, input) {
+    try {
+      const skills = (Array.isArray(input.skills) ? input.skills : []).filter((s) => this.skills[s]);
+      const agent = await this.hire(task, { role: input.role, skills, why: input.why, domain: input.domain }, a.id);
+      const skill = skills.includes(agent.skills[0]) ? agent.skills[0] : bestSkill(this.skills, agent.skills, `${input.assignment} ${input.role}`);
+      const sub = this.addDynamicSubtask(task, agent.id, skill, input.assignment, a.id);
+      return `Hired ${agent.name} (${agent.role}). Their workstream ${sub.id} is queued: "${clip(String(input.assignment || ''), 140)}". Their output goes into the final summary. Do not wait for it: state what you expect from them and carry on with your own deliverable.`;
+    } catch (e) { return `Could not hire: ${e.message}`; }
+  },
+
+  /** Planning-time hires. Live: the CMO's plan lists them. Simulated: rules read the brief and the site. */
+  async applyHires(task, plan, rawHires) {
+    if (this.hiringMode === 'off') return this.dropHireSteps(plan);
+    const mock = this.llm.mode === 'mock';
+    const siteText = (task.sources || []).flatMap((s) => s.pages.map((p) => p.title)).join(' ');
+    let specs;
+    if (mock) specs = hireRulesFor(`${task.title} ${task.brief} ${siteText}`, this.existingDomains()).map((r) => ({ role: r.role, skills: r.skills, domain: r.domain, why: `The brief is in the ${r.domain} domain and nobody on the team has worked in it.`, assignment: r.step, dept: r.dept }));
+    else specs = (Array.isArray(rawHires) ? rawHires : []).slice(0, this.hiringCaps.perTask).map((h) => ({ role: h.role, skills: h.skills, domain: h.domain, why: h.why, assignment: h.assignment }));
+    const made = [];
+    for (const [i, spec] of specs.entries()) {
+      try {
+        const agent = await this.hire(task, spec, 'vera');
+        made[i] = agent;
+        if (mock) {
+          const [skill, instruction] = Array.isArray(spec.assignment) ? spec.assignment : [agent.skills[0], spec.assignment || 'Contribute your expertise.'];
+          this.insertLeadingStep(plan, agent.id, this.skills[skill] ? skill : agent.skills[0], instruction);
+        }
+      } catch (e) {
+        this.addLog(`Could not hire a ${spec.role}: ${e.message}`, { type: 'system', taskId: task.id }); this.talk(task, { from: 'vera', to: 'all', kind: 'hire', text: `I looked at hiring a ${spec.role} but: ${e.message}` });
+      }
+    }
+    if (!mock) {
+      for (const st of plan.steps) {
+        const m = /^hire:(\d+)$/.exec(st.agent || '');
+        if (m) { const ag = made[Number(m[1])]; st.agent = ag ? ag.id : this.bestExisting(st.skill, st.instruction); }
+      }
+    }
+    return this.dropHireSteps(plan);
+  },
+
+  dropHireSteps(plan) { for (const st of plan.steps) if (/^hire:\d+$/.test(st.agent || '')) st.agent = this.bestExisting(st.skill, st.instruction); return plan; },
+  bestExisting(skill, text) {
+    const owners = [...this.sim.agents.values()].filter((a) => a.skills.includes(skill));
+    return (owners.sort((x, y) => this.load_of(x.id) - this.load_of(y.id))[0] || this.agent('vera')).id;
+  },
+
+  /** The new person's domain brief goes first and feeds the people who write, plan and sell. */
+  insertLeadingStep(plan, agentId, skill, instruction) {
+    plan.steps.forEach((st) => { st.deps = st.deps.map((d) => d + 1); });
+    plan.steps.unshift({ agent: agentId, skill, instruction, deps: [], consult: null });
+    const feeds = new Set(['copywriting', 'ads', 'cro', 'cold-email', 'emails', 'social', 'ad-creative', 'content-strategy', 'offers', 'lead-magnets', 'public-relations', 'prospecting']);
+    plan.steps.forEach((st, i) => { if (i > 0 && feeds.has(st.skill) && !st.deps.includes(0)) st.deps.push(0); });
+    plan.summary = `${plan.summary} (with a new domain specialist briefing the team first)`;
+  },
+
+  // ---------- approval mode ----------
+  awaitHireApproval(task, spec, requesterId) {
+    return new Promise((resolve, reject) => {
+      const id = `HR${++this.seq.hireReq}`;
+      const req = { id, taskId: task?.id || null, role: spec.role, skills: spec.skills, why: clip(String(spec.why || ''), 240), by: requesterId, created: Date.now() };
+      const timer = setTimeout(() => { if (this.hireRequests.delete(id)) { this.emit('broadcast', { type: 'hire_resolved', id, ok: false }); reject(new Error('No answer from God in 10 minutes, so the hire was not made.')); } }, 10 * 60 * 1000);
+      this.hireRequests.set(id, { req, resolve: () => { clearTimeout(timer); resolve(); }, reject: (m) => { clearTimeout(timer); reject(new Error(m)); } });
+      this.emit('broadcast', { type: 'hire_request', req });
+      this.toast(`${this.agent(requesterId)?.short || 'Someone'} wants to hire a ${spec.role}. Approve in the Team tab.`, 'warn');
+      this.talk(task, { from: requesterId, to: 'god', kind: 'hire', text: `Requesting approval to hire a ${spec.role}: ${req.why}` });
+    });
+  },
+  pendingHires() { return [...this.hireRequests.values()].map((x) => x.req); },
+  decideHire(id, ok) {
+    const h = this.hireRequests.get(id); if (!h) return false;
+    this.hireRequests.delete(id); this.emit('broadcast', { type: 'hire_resolved', id, ok: !!ok });
+    if (ok) h.resolve(); else h.reject('God declined the hire.');
+    return true;
+  },
+
+  /** God hires someone directly, outside any task. */
+  async godHire({ role, skills, why, domain }) {
+    const list = (Array.isArray(skills) ? skills : String(skills || '').split(/[,\s]+/)).map((s) => s.trim()).filter(Boolean);
+    const agent = await this.hire(null, { role, skills: list, why: why || 'Hired by God.', domain: domain || null, capacity: true }, 'god');
+    return agent;
+  },
+
+  async fire(id) {
+    const a = this.agent(id); if (!a?.hired) throw new Error('Only people who were hired can be let go.');
+    if (a.busy) throw new Error(`${a.short} is working right now.`);
+    if (this.load_of(id) > 0) throw new Error(`${a.short} still has work assigned.`);
+    this.kb.inherit?.(id, a.dept);
+    this.talk(null, { from: 'god', to: id, kind: 'hire', text: `${a.name} has been let go. What they learned stays with the team.` });
+    this.hires.delete(id); this.sim.removeAgent(id);
+    this.emit('broadcast', { type: 'agent_removed', id, hiring: this.hiringStatus() });
+    this.addLog(`${a.name} (${a.role}) was let go`, { type: 'system' });
+  },
+};

@@ -9,7 +9,8 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 // ------------------------------------------------------------ state
 const st = {
   init: null, agents: {}, order: [], tasks: new Map(), deliv: new Map(), comms: [], log: [], stats: null, settings: null,
-  snap: null, live: {}, selected: null, tab: 'tasks', openTasks: new Set(), commsFilter: 'all', unreadOutput: 0, fxSeen: new Set(),
+  snap: null, live: {}, selected: null, tab: 'tasks', openTasks: new Set(), commsFilter: 'all', commsTask: 'all', unreadOutput: 0, fxSeen: new Set(),
+  kb: null, hiring: null, brainFilter: 'all', brainQuery: '', pendingHires: [],
 };
 let ws, renderer, reconnectDelay = 500;
 
@@ -33,6 +34,11 @@ function handle(m) {
     case 'stats': st.stats = m.stats; st.settings = m.settings; updateTop(); if (st.tab === 'metrics') renderMetrics(); break;
     case 'settings': st.settings = m.settings; updateTop(); if (!$('#modal').hidden && $('#modal-card').dataset.kind === 'settings') openSettings(); break;
     case 'toast': toast(m.text, m.level); break;
+    case 'kb': st.kb = m.kb; if (st.tab === 'brain') renderBrain(); updateBadges(); break;
+    case 'agent_added': { const a = m.agent; st.agents[a.id] = a; if (!st.order.includes(a.id)) st.order.push(a.id); renderer?.addAgent(a); st.hiring = m.hiring; if (st.tab === 'team') renderTeam(); break; }
+    case 'agent_removed': { delete st.agents[m.id]; st.order = st.order.filter((x) => x !== m.id); delete st.live[m.id]; renderer?.removeAgent(m.id); st.hiring = m.hiring; if (st.selected === m.id) st.selected = null; if (st.tab === 'team') renderTeam(); break; }
+    case 'hire_request': st.pendingHires.push(m.req); if (st.tab === 'team') renderTeam(); break;
+    case 'hire_resolved': st.pendingHires = st.pendingHires.filter((x) => x.id !== m.id); if (st.tab === 'team') renderTeam(); break;
     case 'deliverable_full': openDeliverable(m.deliverable); break;
     case 'skill_full': openSkill(m.skill); break;
     default: break;
@@ -43,7 +49,7 @@ function handle(m) {
 function onInit(m) {
   st.init = m; st.agents = Object.fromEntries(m.agents.map((a) => [a.id, a])); st.order = m.agents.map((a) => a.id);
   st.tasks = new Map(m.tasks.map((t) => [t.id, t])); st.deliv = new Map(m.deliverables.map((d) => [d.id, d]));
-  st.comms = m.comms; st.log = m.log; st.stats = m.stats; st.settings = m.settings; st.snap = m.snapshot;
+  st.comms = m.comms; st.log = m.log; st.stats = m.stats; st.settings = m.settings; st.snap = m.snapshot; st.kb = m.kb; st.hiring = m.hiring; st.pendingHires = m.hiring?.pending || [];
   for (const a of m.snapshot.agents) st.live[a.id] = a;
   $('#tagline').textContent = `· ${m.company.tagline}`;
   if (!renderer) {
@@ -54,7 +60,7 @@ function onInit(m) {
   // console selects
   const sel = $('#task-assignee'); sel.innerHTML = '<option value="">Vera plans it</option>' + m.agents.map((a) => `<option value="${a.id}">${esc(a.short)} · ${esc(a.role)}</option>`).join('');
   const tpl = $('#task-tpl'); tpl.innerHTML = '<option value="">Templates…</option>' + TEMPLATES.map((t, i) => `<option value="${i}">${esc(t.name)}</option>`).join('');
-  renderTasks(); renderComms(); renderTeam(); renderOutput(); renderMetrics(); renderLog(); updateTop(); updateBadges();
+  renderTasks(); renderComms(); renderTeam(); renderBrain(); renderOutput(); renderMetrics(); renderLog(); updateTop(); updateBadges();
   setTimeout(() => $('#loading').classList.add('gone'), 300);
   setTimeout(() => ($('#stage-hint').style.opacity = 0), 9000);
 }
@@ -168,7 +174,7 @@ function setTab(tab) {
   $$('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   $$('.panel').forEach((p) => p.classList.toggle('on', p.id === `p-${tab}`));
   if (tab === 'output') { st.unreadOutput = 0; updateBadges(); }
-  if (tab === 'team') renderTeam(); if (tab === 'metrics') renderMetrics(); if (tab === 'log') renderLog(); if (tab === 'comms') { renderComms(); }
+  if (tab === 'team') renderTeam(); if (tab === 'brain') renderBrain(); if (tab === 'metrics') renderMetrics(); if (tab === 'log') renderLog(); if (tab === 'comms') { renderComms(); }
 }
 
 // ------------------------------------------------------------ tasks panel
@@ -214,8 +220,22 @@ function taskDetail(t) {
   const subs = t.subtasks.map((s) => `<div class="sub">${avatar(s.agent)}<div class="what"><b data-agent="${s.agent}" style="cursor:pointer">${esc(st.agents[s.agent]?.short || s.agent)}</b> <span class="skill" data-skill="${s.skill}">${s.skill}</span>${s.consult ? ` <span class="muted">· consulted ${esc(nm(s.consult))}</span>` : ''}
         <div class="hl">${esc(s.status === 'done' ? (s.headline || s.instruction) : s.instruction)}</div>${s.review ? `<div class="rv">${esc(nm(s.review.by))}: ${esc(s.review.text)}</div>` : ''}</div>
         <div style="text-align:right"><span class="status ${s.status === 'working' ? 'active' : s.status === 'done' ? 'done' : s.status === 'failed' ? 'failed' : ''}">${s.status}</span>${s.outputId ? `<div><button class="btn sm" data-deliv="${s.outputId}" style="margin-top:4px">Read</button></div>` : ''}</div></div>`).join('');
-  return `${t.brief ? `<div class="plan"><b>Brief:</b> ${esc(t.brief)}</div>` : ''}${intakeHtml(t)}${t.plan ? `<div class="plan"><b>Plan:</b> ${esc(t.plan.summary)}</div>` : ''}${subs}
+  return `${t.brief ? `<div class="plan"><b>Brief:</b> ${esc(t.brief)}</div>` : ''}${intakeHtml(t)}${teamHtml(t)}${t.plan ? `<div class="plan"><b>Plan:</b> ${esc(t.plan.summary)}</div>` : ''}${subs}
     <div class="row" style="margin-top:10px">${t.summaryId ? `<button class="btn primary" data-deliv="${t.summaryId}">Read executive summary</button>` : ''}${t.profileId ? `<button class="btn" data-deliv="${t.profileId}">Client profile</button>` : ''}${['failed', 'interrupted'].includes(t.status) ? `<button class="btn" data-retry="${t.id}">Retry</button>` : ''}${t.error ? `<span class="muted">${esc(t.error)}</span>` : ''}</div>`;
+}
+
+function teamHtml(t) {
+  const meets = t.meetings || []; const decs = t.decisions || []; const hires = (t.hires || []).map((id) => st.agents[id]).filter(Boolean); const learned = (t.learned || []).map((id) => st.kb?.lessons?.find((l) => l.id === id)).filter(Boolean);
+  if (!meets.length && !hires.length && !learned.length) return '';
+  const ico = { kickoff: '🚀', alignment: '⚖', retro: '🔁' };
+  const mh = meets.map((m) => `<details class="meet"><summary><span>${ico[m.type] || '💬'} ${esc(m.title)}</span><span class="avatars">${m.participants.slice(0, 8).map((p) => avatar(p)).join('')}</span></summary>
+      <div class="turns">${m.turns.map((x) => `<div class="turn">${avatar(x.agent)}<div><b>${esc(nm(x.agent))}</b> ${esc(x.text)}</div></div>`).join('') || '<div class="muted">In progress…</div>'}</div></details>`).join('');
+  return `<div class="intake">
+    ${hires.length ? `<div class="ih">Hired for this task</div>${hires.map((h) => `<div class="srcline">${avatar(h.id)} <b>${esc(h.name)}</b>, ${esc(h.role)}${h.why ? ` — ${esc(h.why)}` : ''}</div>`).join('')}` : ''}
+    ${meets.length ? `<div class="ih">Meetings</div>${mh}` : ''}
+    ${decs.length ? `<div class="ih q">Decisions</div><ul class="finds">${decs.map((d) => `<li><b>${esc(d.issue)}</b><br>${esc(d.decision)}</li>`).join('')}</ul>` : ''}
+    ${t.retro ? `<div class="ih">Retrospective</div><ul class="finds">${[...(t.retro.wentWell || []).map((x) => `✓ ${x}`), ...(t.retro.wentWrong || []).map((x) => `✗ ${x}`)].map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+    ${learned.length ? `<div class="ih">What the team learned from this</div><ul class="finds">${learned.slice(0, 8).map((l) => `<li>${esc(l.text)} <span class="muted">(${esc(l.scope)}, ${esc(l.source)})</span></li>`).join('')}</ul>` : ''}</div>`;
 }
 
 function intakeHtml(t) {
@@ -237,7 +257,9 @@ function renderComms() {
   const p = $('#p-comms');
   const f = st.commsFilter;
   const btn = (k, l) => `<button data-f="${k}" class="${f === k ? 'on' : ''}">${l}</button>`;
-  p.innerHTML = `<div class="filters">${btn('all', 'All')}${btn('work', 'Work')}${btn('talk', 'Consults & reviews')}${btn('banter', 'Banter')}${btn('god', 'God')}</div><div id="feed"></div>`;
+  const taskOpts = `<option value="all">All tasks</option>${[...st.tasks.values()].sort((a, b) => b.created - a.created).map((t) => `<option value="${t.id}" ${st.commsTask === t.id ? 'selected' : ''}>${t.id} ${esc(t.title.slice(0, 28))}</option>`).join('')}`;
+  p.innerHTML = `<div class="filters">${btn('all', 'All')}${btn('work', 'Work')}${btn('meet', 'Meetings')}${btn('talk', 'Talk')}${btn('research', 'Research')}${btn('banter', 'Banter')}${btn('god', 'God')}<select id="c-task" class="minisel">${taskOpts}</select></div><div id="feed"></div>`;
+  $('#c-task', p).onchange = (e) => { st.commsTask = e.target.value; renderComms(); };
   $$('.filters button', p).forEach((b) => (b.onclick = () => { st.commsFilter = b.dataset.f; renderComms(); }));
   const feed = $('#feed', p);
   const msgs = st.comms.filter(passes).slice(-160);
@@ -246,7 +268,9 @@ function renderComms() {
 }
 function passes(m) {
   const f = st.commsFilter;
-  if (f === 'all') return true; if (f === 'work') return m.kind === 'task'; if (f === 'talk') return m.kind === 'consult' || m.kind === 'review';
+  if (st.commsTask !== 'all' && m.taskId !== st.commsTask) return false;
+  if (f === 'all') return true; if (f === 'work') return m.kind === 'task'; if (f === 'meet') return ['kickoff', 'retro', 'decision', 'question'].includes(m.kind);
+  if (f === 'talk') return ['consult', 'review', 'handoff', 'status', 'hire'].includes(m.kind); if (f === 'research') return m.kind === 'research';
   if (f === 'banter') return m.kind === 'banter'; if (f === 'god') return m.from === 'god' || m.to === 'god';
   return true;
 }
@@ -266,13 +290,22 @@ function appendComms(m) {
 function renderTeam() {
   const p = $('#p-team'); const byDept = {};
   for (const id of st.order) (byDept[st.agents[id].dept] ||= []).push(id);
-  p.innerHTML = Object.entries(byDept).map(([d, ids]) => `<div class="dept-title" style="color:${st.init.depts[d].color}"><i style="background:${st.init.depts[d].color}"></i>${esc(st.init.depts[d].label)}</div>` + ids.map((id) => {
-    const a = st.agents[id];
-    return `<div class="person" data-id="${id}"><canvas width="48" height="72" data-av="${id}"></canvas><div><div class="nm">${esc(a.name)}</div><div class="rl">${esc(a.role)}</div><div class="st" data-st="${id}"></div>
+  const h = st.hiring;
+  const pend = (st.pendingHires || []).map((r) => `<div class="card hirereq"><b>${esc(st.agents[r.by]?.short || r.by)} wants to hire a ${esc(r.role)}</b><div class="muted">${esc(r.why)}</div><div class="muted">Skills: ${esc((r.skills || []).join(', '))}</div><div class="row" style="margin-top:6px"><button class="btn primary sm" data-hd="${r.id}" data-ok="1">Approve</button><button class="btn sm" data-hd="${r.id}" data-ok="0">Decline</button></div></div>`).join('');
+  const kids = (id) => st.order.filter((x) => st.agents[x].reportsTo === id);
+  const node = (id, depth = 0) => `<div class="org" style="margin-left:${depth * 14}px" data-sel="${id}">${avatar(id)}<b>${esc(st.agents[id].short)}</b><span class="muted">${esc(st.agents[id].role)}</span>${st.agents[id].hired ? '<em class="tagnew">hired</em>' : ''}</div>${kids(id).map((k) => node(k, depth + 1)).join('')}`;
+  p.innerHTML = `${pend}<div class="card"><div class="row" style="justify-content:space-between"><div><b>${h ? h.headcount : st.order.length} people</b> <span class="muted">· ${h ? h.hired : 0} hired · ${h ? h.freeDesks : 0} free desks in the Annex · hiring: ${esc(st.settings?.hiring || 'auto')}</span></div><button class="btn sm" id="t-hire">+ Hire someone</button></div>
+    <details class="orgchart"><summary>Org chart</summary>${st.agents.vera ? node('vera') : ''}</details></div>`
+    + Object.entries(byDept).map(([d, ids]) => `<div class="dept-title" style="color:${st.init.depts[d].color}"><i style="background:${st.init.depts[d].color}"></i>${esc(st.init.depts[d].label)}</div>` + ids.map((id) => {
+      const a = st.agents[id]; const rep = a.reportsTo ? st.agents[a.reportsTo]?.short : null;
+      return `<div class="person" data-id="${id}"><canvas width="48" height="72" data-av="${id}"></canvas><div><div class="nm">${esc(a.name)} ${a.lead ? '<em class="taglead">lead</em>' : ''}${a.hired ? '<em class="tagnew">hired</em>' : ''}</div><div class="rl">${esc(a.role)}${rep ? ` · reports to ${esc(rep)}` : ''}</div><div class="st" data-st="${id}"></div>
       <div class="bars"><span>EN</span><div class="bar en"><i data-en="${id}"></i></div><span>MO</span><div class="bar mo"><i data-mo="${id}"></i></div></div></div></div>`;
-  }).join('')).join('');
+    }).join('')).join('');
   $$('canvas[data-av]', p).forEach((c) => { const a = st.agents[c.dataset.av]; const ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = false; ctx.drawImage(personFrame(a.id, a.look, 'down', 'stand', 0), 0, 0, 48, 72); });
   $$('.person', p).forEach((c) => (c.onclick = () => { selectAgent(c.dataset.id, { focus: true, open: true }); }));
+  $$('[data-sel]', p).forEach((c) => (c.onclick = () => selectAgent(c.dataset.sel, { focus: true })));
+  $$('[data-hd]', p).forEach((b) => (b.onclick = () => send({ type: 'hireDecision', id: b.dataset.hd, ok: b.dataset.ok === '1' })));
+  $('#t-hire', p).onclick = () => openHireForm();
   updateTeam();
 }
 function updateTeam() {
@@ -284,6 +317,51 @@ function updateTeam() {
     if (en) en.style.width = `${l.energy}%`; if (mo) mo.style.width = `${l.mood}%`;
   }
   $$('.person', p).forEach((c) => c.classList.toggle('sel', c.dataset.id === st.selected));
+}
+
+// ------------------------------------------------------------ brain (what the company has learned)
+function renderBrain() {
+  const p = $('#p-brain'); const kb = st.kb; if (!kb) return;
+  const sm = kb.summary; const ap = sm.approval; const mode = st.settings?.learning || sm.mode;
+  const pct = (v, n) => (v == null ? '–' : `${v}%`) + (n ? ` <small>n=${n}</small>` : '');
+  const f = st.brainFilter; const q = st.brainQuery.toLowerCase();
+  const lessons = kb.lessons.filter((l) => (f === 'all' || (f === 'web' ? l.unverified : f === 'pinned' ? l.pinned : l.scope === f)) && (!q || l.text.toLowerCase().includes(q) || (l.skill || '').includes(q)));
+  const chip = (k, t) => `<button data-bf="${k}" class="${f === k ? 'on' : ''}">${t}</button>`;
+  const learnHelp = { active: 'Learns from reviews, retrospectives and by studying the web in idle time.', passive: 'Learns from reviews and retrospectives only. No web study.', off: 'Nothing is recorded or injected.' }[mode];
+  p.innerHTML = `
+    <div class="tiles">
+      <div class="tile"><div class="k">Lessons</div><div class="v">${sm.active}</div></div><div class="tile"><div class="k">Avg. score</div><div class="v">${Math.round(sm.avgScore * 100)}<small>%</small></div></div><div class="tile"><div class="k">Playbooks</div><div class="v">${sm.playbooks}</div></div>
+      <div class="tile"><div class="k">Promoted</div><div class="v">${sm.promoted}</div></div><div class="tile"><div class="k">Retired</div><div class="v">${sm.retired}</div></div><div class="tile"><div class="k">Studied</div><div class="v">${sm.studySessions}</div></div>
+    </div>
+    <div class="card" style="margin-top:10px"><div class="k muted" style="font:10px var(--mono);letter-spacing:1px;text-transform:uppercase">Does learning help? First-pass approval</div>
+      <div class="row" style="gap:18px;margin-top:4px"><div>With lessons applied <b style="font-size:18px">${pct(ap.withLessons, ap.nWith)}</b></div><div>Without <b style="font-size:18px">${pct(ap.without, ap.nWithout)}</b></div></div>
+      <div class="muted" style="font-size:11px;margin-top:4px">Measured on real reviews. Treat it as a trend once each side has 10 or more.</div></div>
+    <div class="card"><div class="row" style="justify-content:space-between"><b>Learning: ${esc(mode)}</b><span class="seg" id="b-mode">${['active', 'passive', 'off'].map((m) => `<button data-m="${m}" class="${m === mode ? 'on' : ''}">${m}</button>`).join('')}</span></div><div class="muted" style="margin-top:6px;font-size:12px">${esc(learnHelp)} Lessons are scored by whether the work they influenced was approved: useful ones are promoted from you to your team to the company, weak ones are retired, and clusters become house playbooks. Ideas from the web stay unverified until they help.</div></div>
+    ${kb.events.length ? `<h3 class="sect">Recent learning</h3>${[...kb.events].reverse().slice(0, 5).map((e) => `<div class="log"><span class="tm">${timeStr(e.t)}</span><span>${esc(e.text)}</span></div>`).join('')}` : ''}
+    <h3 class="sect">Lessons</h3>
+    <div class="filters" style="position:static;margin:0 0 8px;padding:0">${chip('all', 'All')}${chip('company', 'Company')}${chip('team', 'Team')}${chip('agent', 'Individual')}${chip('client', 'Client')}${chip('web', 'Unverified')}${chip('pinned', 'Pinned')}</div>
+    <input class="search" id="b-q" placeholder="Search lessons…" value="${esc(st.brainQuery)}" />
+    ${lessons.length ? lessons.slice(0, 80).map((l) => `<div class="card lesson ${l.unverified ? 'unv' : ''}"><div class="txt">${esc(l.text)}</div>
+        <div class="tagrow">${l.agent ? avatar(l.agent) : ''}<span class="pill">${esc(l.scope)}${l.kind === 'rule' ? ' rule' : ''}</span><span class="pill">${esc(l.source)}</span>${l.skill ? `<span class="pill">${esc(l.skill)}</span>` : ''}${l.unverified ? '<span class="pill sim">unverified</span>' : ''}${l.pinned ? '<span class="pill sum">pinned</span>' : ''}<span>used ${l.uses.toFixed(1)}× · won ${l.wins.toFixed(1)}</span></div>
+        <div class="row" style="justify-content:space-between;margin-top:6px"><div class="progress" style="flex:1;margin:0"><i style="width:${Math.round(l.score * 100)}%"></i></div><span class="muted" style="font:11px var(--mono)">${Math.round(l.score * 100)}%</span><button class="btn sm" data-pin="${l.id}">${l.pinned ? 'Unpin' : 'Pin'}</button><button class="btn sm" data-forget="${l.id}">Forget</button></div></div>`).join('') : '<div class="empty">No lessons here yet. They appear after reviews and retrospectives.</div>'}
+    ${Object.keys(kb.playbooks).length ? `<h3 class="sect">House playbooks</h3>${Object.values(kb.playbooks).map((pb) => `<div class="card"><b>${esc(pb.skill)}</b> <span class="muted">v${pb.version} · used ${pb.uses} · approved ${pb.wins}</span><div class="md">${md(pb.text)}</div></div>`).join('')}` : ''}
+    ${kb.notes.length ? `<h3 class="sect">Reading list <span class="muted">· what agents studied on the web</span></h3>${kb.notes.slice(0, 12).map((n) => `<div class="card"><div class="tagrow">${avatar(n.agent)}<span class="pill">${esc(n.skill)}</span></div>${n.url ? `<a href="${esc(n.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--cyan)">${esc(n.title)}</a>` : esc(n.title)}${n.headings?.length ? `<div class="muted" style="font-size:11.5px;margin-top:3px">${n.headings.map(esc).join(' · ')}</div>` : ''}${n.note ? `<div class="muted" style="font-size:11.5px">${esc(n.note)}</div>` : ''}</div>`).join('')}` : ''}`;
+  $$('[data-bf]', p).forEach((b) => (b.onclick = () => { st.brainFilter = b.dataset.bf; renderBrain(); }));
+  $('#b-q', p).oninput = (e) => { st.brainQuery = e.target.value; const pos = e.target.selectionStart; renderBrain(); const n = $('#b-q'); n.focus(); n.setSelectionRange(pos, pos); };
+  $$('[data-pin]', p).forEach((b) => (b.onclick = () => { const l = kb.lessons.find((x) => x.id === b.dataset.pin); send({ type: 'kbPin', id: b.dataset.pin, value: !l?.pinned }); }));
+  $$('[data-forget]', p).forEach((b) => (b.onclick = () => send({ type: 'kbForget', id: b.dataset.forget })));
+  $$('#b-mode button', p).forEach((b) => (b.onclick = () => send({ type: 'setLearning', value: b.dataset.m })));
+}
+
+function openHireForm() {
+  const skills = st.init.skills.map((k) => k.name);
+  openModal(`<button class="btn close">✕</button><h2>Hire someone</h2><div class="muted">They get a desk in the Annex and join the team. The CMO and the leads can also hire when a task needs it (hiring mode: ${esc(st.settings?.hiring || 'auto')}).</div>
+    <form id="hire-form"><label class="field-label">Job title</label><input class="field" id="h-role" maxlength="60" placeholder="e.g. Marine Industry Strategist" required />
+    <label class="field-label">Skills they will own (comma separated)</label><input class="field" id="h-skills" list="h-skill-list" placeholder="customer-research, competitors" required /><datalist id="h-skill-list">${skills.map((k) => `<option value="${k}">`).join('')}</datalist>
+    <label class="field-label">Domain (optional, one word)</label><input class="field" id="h-domain" maxlength="24" placeholder="marine" />
+    <label class="field-label">Why</label><textarea class="field" id="h-why" rows="2" maxlength="240" placeholder="What the team is missing"></textarea>
+    <div class="row" style="margin-top:14px"><button class="btn primary">Hire</button></div></form>`, 'hire');
+  $('#hire-form').onsubmit = (e) => { e.preventDefault(); send({ type: 'hire', role: $('#h-role').value.trim(), skills: $('#h-skills').value.split(/[,\s]+/).filter(Boolean), why: $('#h-why').value.trim(), domain: $('#h-domain').value.trim() || null }); closeModal(); };
 }
 
 // ------------------------------------------------------------ output panel
@@ -311,6 +389,7 @@ function renderMetrics() {
       ${tile('Tasks done', s.completed, `of ${s.tasks}`)}${tile('Deliverables', s.deliverables)}${tile('Active', s.active, `+${s.queued} queued`)}
       ${tile('Tokens', fmtNum(t.inputTokens + t.outputTokens), t.simulated ? 'est.' : '')}${tile('Spend', (t.simulated ? '~' : '') + fmtMoney(t.cost), `/ $${s.budgetCap}`)}${tile('API calls', t.calls)}
       ${tile('Morale', s.morale + '%')}${tile('Energy', s.energy + '%')}${tile('Cached', fmtNum(t.cacheReadTokens), 'tok')}
+      ${tile('People', s.hiring?.headcount ?? '', `${s.hiring?.hired ?? 0} hired`)}${tile('Lessons', s.learning?.active ?? 0, `${s.learning?.playbooks ?? 0} playbooks`)}${tile('Study', s.learning?.studySessions ?? 0, 'sessions')}
     </div>
     ${live ? '' : `<div class="notice">Simulated mode: tokens and cost are estimates of what the real calls would use. Add an API key in Settings to run live Claude agents.</div>`}
     <h3 class="sect">Token usage over time</h3>${spark(hist.map((h) => h.tokens), '#5ee7ff')}
@@ -363,12 +442,13 @@ function openSkill(s) {
 function openInspector(id) {
   const a = st.agents[id];
   openModal(`<button class="btn close">✕</button><div class="insp"><canvas id="insp-av" width="48" height="72"></canvas><div>
-    <h2>${esc(a.name)}</h2><div class="muted">${esc(a.role)} · ${esc(st.init.depts[a.dept].label)}</div>
+    <h2>${esc(a.name)} ${a.lead ? '<em class="taglead">lead</em>' : ''}${a.hired ? '<em class="tagnew">hired</em>' : ''}</h2><div class="muted">${esc(a.role)} · ${esc(st.init.depts[a.dept]?.label || a.dept)}${a.reportsTo ? ` · reports to ${esc(st.agents[a.reportsTo]?.name || a.reportsTo)}` : ''}${a.domains?.length ? ` · domain: ${esc(a.domains.join(', '))}` : ''}</div>
     <p>${esc(a.persona)}</p><div id="insp-live" class="notice"></div>
-    <div class="row"><button class="btn" id="i-follow">Follow</button><button class="btn" id="i-bless">✨ Bless</button><button class="btn" id="i-smite">⚡ Smite (lightly)</button><button class="btn primary" id="i-task">Assign task</button></div></div></div>
+    <div class="row"><button class="btn" id="i-follow">Follow</button><button class="btn" id="i-bless">✨ Bless</button><button class="btn" id="i-smite">⚡ Smite (lightly)</button><button class="btn primary" id="i-task">Assign task</button>${a.hired ? '<button class="btn" id="i-fire">Let go</button>' : ''}</div></div></div>
     <h3 class="sect" style="margin-top:18px">Skills</h3><div class="chips">${a.skills.map((k) => `<span class="skill" data-skill="${k}">${k}</span>`).join('')}</div>
     <h3 class="sect">Talk to ${esc(a.short)}</h3><form class="row" id="i-chat"><input class="field" style="flex:1" id="i-chat-text" placeholder="Say something to ${esc(a.short)}…" maxlength="500"/><button class="btn">Send</button></form><div id="i-reply" class="muted" style="margin-top:6px"></div>
-    <h3 class="sect">Memory</h3><div id="insp-mem"></div>`, 'agent');
+    <h3 class="sect">What ${esc(a.short)} has learned</h3><div id="insp-les"></div><h3 class="sect">Memory</h3><div id="insp-mem"></div>`, 'agent');
+  const fire = $('#i-fire'); if (fire) fire.onclick = () => { if (confirm(`Let ${a.name} go? What they learned stays with the team.`)) { send({ type: 'fire', id }); closeModal(); } };
   const c = $('#insp-av').getContext('2d'); c.imageSmoothingEnabled = false; c.drawImage(personFrame(a.id, a.look, 'down', 'stand', 0), 0, 0, 48, 72);
   $('#i-follow').onclick = () => { closeModal(); renderer.follow = id; renderer.cam.zoom = Math.max(renderer.cam.zoom, 3); };
   $('#i-bless').onclick = () => send({ type: 'bless', agent: id }); $('#i-smite').onclick = () => send({ type: 'smite', agent: id });
@@ -383,6 +463,7 @@ function updateInspector() {
   const s = st.stats?.agents?.find((x) => x.id === id);
   live.innerHTML = `<b>${l.busy ? '● Working' : 'Free'}</b> · ${esc(l.status)}<br><span class="muted">Energy ${l.energy}% · Mood ${l.mood}%${s ? ` · ${s.stats.deliverables} deliverables · ${fmtNum(s.stats.tokens)} tokens · ${s.stats.consults} consults` : ''}</span>`;
   const mem = $('#insp-mem'); if (mem && s) mem.innerHTML = s.memory.length ? [...s.memory].reverse().map((m) => `<div class="mem">${esc(m.text)}</div>`).join('') : '<div class="muted">Nothing yet.</div>';
+  const les = $('#insp-les'); if (les) { const mine = (st.kb?.lessons || []).filter((l) => l.agent === id).slice(0, 6); les.innerHTML = mine.length ? mine.map((l) => `<div class="mem">${esc(l.text)} <span class="muted">(${Math.round(l.score * 100)}%${l.unverified ? ', unverified' : ''})</span></div>`).join('') : '<div class="muted">Nothing yet. Lessons appear after reviews.</div>'; }
   const last = [...st.comms].reverse().find((m) => m.kind === 'dm' && m.from === id);
   const rep = $('#i-reply'); if (rep && last && !rep.textContent.endsWith('thinking…')) rep.innerHTML = `<b style="color:${a.color}">${esc(a.short)}:</b> ${esc(last.text)}`;
   else if (rep && last && rep.textContent.endsWith('thinking…') && last.wall > (rep._t || 0)) { rep.innerHTML = `<b style="color:${a.color}">${esc(a.short)}:</b> ${esc(last.text)}`; }
@@ -396,12 +477,16 @@ function openSettings() {
     <div class="row"><input class="field" style="flex:1" id="s-key" type="password" placeholder="${s.hasKey ? '•••••••• (leave blank to keep)' : 'sk-ant-…'}" autocomplete="off" /><button class="btn primary" id="s-save">${s.hasKey ? 'Update & go live' : 'Save & go live'}</button></div>
     <label class="field-label">Model</label><div class="row"><input class="field" style="flex:1" id="s-model" value="${esc(s.model)}" /><button class="btn" id="s-model-save">Set</button></div>
     <label class="field-label">Budget cap (USD, estimated)</label><div class="row"><input class="field" style="flex:1" id="s-budget" type="number" min="0.1" step="0.5" value="${s.budgetCap}" /><button class="btn" id="s-budget-save">Set</button></div>
+    <label class="field-label">Team conversation (cost vs. realism)</label><div class="row">${['full', 'lean', 'off'].map((m) => `<button class="btn ${s.collab === m ? 'primary' : ''}" data-collab="${m}">${m}</button>`).join('')}</div><div class="muted" style="font-size:11.5px;margin-top:4px">full: kickoff, handoffs, consults, alignment meetings. lean: fewer calls. off: agents just work. Each conversation turn is a small model call in live mode.</div>
+    <label class="field-label">Hiring</label><div class="row">${['auto', 'ask', 'off'].map((m) => `<button class="btn ${s.hiring === m ? 'primary' : ''}" data-hiring="${m}">${m}</button>`).join('')}</div><div class="muted" style="font-size:11.5px;margin-top:4px">auto: the CMO and agents hire within the caps. ask: you approve each hire. off: no hiring.</div>
+    <label class="field-label">Learning</label><div class="row">${['active', 'passive', 'off'].map((m) => `<button class="btn ${s.learning === m ? 'primary' : ''}" data-learning="${m}">${m}</button>`).join('')}</div><div class="muted" style="font-size:11.5px;margin-top:4px">active: also studies the web in idle time. passive: reviews and retrospectives only. off: nothing recorded.</div>
     <label class="field-label">Mode</label><div class="row"><button class="btn ${s.mode === 'mock' ? 'primary' : ''}" id="s-mock">Simulated</button><button class="btn ${s.mode === 'live' ? 'primary' : ''}" id="s-live" ${s.hasKey ? '' : 'disabled'}>Live</button></div>
     ${s.lastError ? `<div class="notice warn">Last API error: ${esc(s.lastError)}</div>` : ''}
     <div class="notice" style="margin-top:16px">Prices used for cost estimates: $${s.price.in}/M input, $${s.price.out}/M output tokens (override with the <code>PRICE_IN</code> / <code>PRICE_OUT</code> env vars). Your key is never written to disk; you can also set <code>ANTHROPIC_API_KEY</code> before starting the server.</div>`, 'settings');
   $('#s-save').onclick = () => { const key = $('#s-key').value.trim(); if (!key && !s.hasKey) return; send({ type: 'setKey', key: key || undefined, useLive: true }); if (!key) send({ type: 'setMode', mode: 'live' }); };
   $('#s-model-save').onclick = () => send({ type: 'setModel', model: $('#s-model').value });
   $('#s-budget-save').onclick = () => send({ type: 'setBudget', value: $('#s-budget').value });
+  $$('[data-collab]', card).forEach((b) => (b.onclick = () => send({ type: 'setCollab', value: b.dataset.collab }))); $$('[data-hiring]', card).forEach((b) => (b.onclick = () => send({ type: 'setHiring', value: b.dataset.hiring }))); $$('[data-learning]', card).forEach((b) => (b.onclick = () => send({ type: 'setLearning', value: b.dataset.learning })));
   $('#s-mock').onclick = () => send({ type: 'setMode', mode: 'mock' }); $('#s-live').onclick = () => send({ type: 'setMode', mode: 'live' });
 }
 
