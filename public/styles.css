@@ -244,3 +244,31 @@ h3.sect:first-child { margin-top: 0; }
 
 /* inline department colours are pale on glass: keep the dot coloured and the text navy */
 .dept-title { color: var(--navy) !important; } .drow > :first-child { color: var(--navy) !important; }
+
+/* ---------- fixes: tab badges and a more translucent, frosted look ---------- */
+#tabs { display: grid; grid-template-columns: repeat(7, 1fr); }
+#tabs button { min-width: 0; padding: 8px 2px; }
+#tabs i { position: absolute; top: -2px; right: 2px; margin: 0; min-width: 16px; height: 16px; padding: 0 4px; line-height: 16px; font-size: 9px; font-weight: 800; border: 2px solid rgba(255,255,255,.85); box-sizing: content-box; box-shadow: 0 3px 8px -3px rgba(217,99,127,.8); }
+#tabs button.on i { background: #fff; color: var(--navy); border-color: var(--navy); }
+.status.active::before { vertical-align: 0; }
+
+:root { --panel: rgba(255,255,255,.34); --panel2: rgba(255,255,255,.42); --glass: blur(26px) saturate(1.6) brightness(1.04); }
+body { background: linear-gradient(155deg, #b9cdd6 0%, #a9cbd1 30%, #c8e8de 68%, #e9f6f1 100%); }
+body::before { opacity: .9; background: #7fb0c6; } body::after { opacity: .85; background: #9fe0c6; }
+.glass, #topbar, #console, #side { border-color: rgba(255,255,255,.55); background: linear-gradient(160deg, rgba(255,255,255,.5), rgba(255,255,255,.22)); box-shadow: 0 1px 0 rgba(255,255,255,.85) inset, 0 0 0 1px rgba(255,255,255,.15) inset, 0 20px 50px -22px rgba(22,49,68,.4); }
+#stage { background: linear-gradient(160deg, rgba(27,64,91,.22), rgba(223,243,235,.3)); border-color: rgba(255,255,255,.55); backdrop-filter: var(--glass); -webkit-backdrop-filter: var(--glass); }
+.card, .person, .tile, .spark, .meet { border-color: rgba(255,255,255,.6); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: 0 1px 0 rgba(255,255,255,.7) inset, 0 10px 24px -16px rgba(22,49,68,.4); }
+.person:hover, .deliv:hover, .card:hover { background: rgba(255,255,255,.62); }
+.chip, .icon-btn, .btn, .powers button, .filters button, .search, .skill, .minisel, #task-form input, #task-form select, #task-form textarea, .field { background: rgba(255,255,255,.5); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-color: rgba(255,255,255,.7); }
+.chip:hover, .icon-btn:hover, .btn:hover, .powers button:hover { background: rgba(255,255,255,.8); }
+.btn.primary, button.primary, .filters button.on { background: var(--navy); backdrop-filter: none; }
+#tabs, .seg { background: rgba(22,49,68,.1); }
+.filters { background: linear-gradient(rgba(220,238,236,.75), rgba(220,238,236,0)); }
+.modal { background: rgba(22,49,68,.25); backdrop-filter: blur(10px) saturate(1.2); }
+.modal-card { background: linear-gradient(160deg, rgba(255,255,255,.7), rgba(235,248,244,.5)); backdrop-filter: blur(30px) saturate(1.6); -webkit-backdrop-filter: blur(30px) saturate(1.6); border-color: rgba(255,255,255,.7); }
+.notice { background: rgba(220,235,243,.55); } .notice.warn { background: rgba(246,234,210,.7); }
+.intake { background: rgba(255,255,255,.35); } .toast { background: rgba(255,255,255,.7); }
+[style*="ffb4a0"] { color: #b8344a !important; }
+.progress { background: rgba(22,49,68,.14); }
+#tabs i { top: -7px; right: -3px; }
+#tabs i { top: -10px; right: -7px; min-width: 14px; height: 14px; line-height: 14px; font-size: 8.5px; }

@@ -174,7 +174,7 @@ $('#tabs').addEventListener('click', (e) => {
 });
 function moveTabIndicator() {
   const on = $('#tabs button.on'), ind = $('#tab-ind'); if (!on || !ind) return;
-  ind.style.width = `${on.offsetWidth}px`; ind.style.transform = `translateX(${on.offsetLeft - 4}px)`;
+  ind.style.width = `${on.offsetWidth}px`; ind.style.transform = `translateX(${on.offsetLeft}px)`;
 }
 window.addEventListener('resize', moveTabIndicator); setTimeout(moveTabIndicator, 60); document.fonts?.ready.then(moveTabIndicator);
 /** Count a number up to its value when a panel opens (skipped for reduced motion). */
