@@ -62,6 +62,24 @@ export class LLM {
     return this.status();
   }
 
+  /**
+   * A small real call that exercises what the agents depend on: the key or login, the model, and (in Claude account
+   * mode) the tool bridge. Returns { ok, ms, error? } and never throws.
+   */
+  async test() {
+    if (this.mode === 'mock') return { ok: true, ms: 0, simulated: true, text: 'Simulated mode: nothing to connect.' };
+    const t0 = Date.now(); let called = 0;
+    try {
+      const withTool = this.mode === 'cli';
+      const r = await this.complete({ kind: 'test', system: 'You are a connectivity check for a software product.', user: withTool ? 'Call the ping tool, then reply with the single word it returned.' : 'Reply with the single word: pong', maxTokens: 30, timeoutMs: Number(process.env.TEST_TIMEOUT_S || 90) * 1000,
+        ...(withTool ? { tools: [{ name: 'ping', description: 'Returns the word pong.', input_schema: { type: 'object', properties: {} } }], onTool: async () => { called++; return 'pong'; }, maxTurns: 2 } : {}) });
+      const ms = Date.now() - t0;
+      if (!/pong/i.test(r.text)) return { ok: false, ms, error: `The model answered, but not as expected: "${String(r.text).slice(0, 80)}"` };
+      if (withTool && !called) return { ok: false, ms, error: 'The Claude CLI answered but did not use the local tool bridge. Your Claude Code may be too old to support HTTP MCP servers, so agents could not use their tools. Update it with: npm install -g @anthropic-ai/claude-code@latest' };
+      return { ok: true, ms, text: `Connected. The model (${this.model}) answered in ${(ms / 1000).toFixed(1)}s${withTool ? ' and the tool bridge works' : ''}.` };
+    } catch (e) { return { ok: false, ms: Date.now() - t0, error: e.message }; }
+  }
+
   setModel(model) { if (model) this.model = model; }
 
   account(inTok, outTok, cacheRead = 0) {

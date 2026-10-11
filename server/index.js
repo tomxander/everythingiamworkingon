@@ -112,6 +112,13 @@ function initPayload() {
   };
 }
 
+/** Check the key/login, model and tool bridge for real, and tell the person plainly. */
+async function testConnection(ws) {
+  send(ws, { type: 'toast', text: 'Testing the connection to Claude…', level: 'info' });
+  const r = await llm.test(); broadcast({ type: 'settings', settings: settings() });
+  broadcast({ type: 'toast', text: r.ok ? r.text : `Connection test failed: ${r.error}`, level: r.ok ? 'good' : 'warn' });
+}
+
 wss.on('connection', (ws) => {
   send(ws, initPayload());
   ws.on('message', async (raw) => {
@@ -129,7 +136,8 @@ wss.on('connection', (ws) => {
         case 'pause': sim.paused = !!m.paused; break;
         case 'speed': sim.speed = Math.min(8, Math.max(0.25, Number(m.speed) || 1)); break;
         case 'setKey': { if (typeof m.key === 'string' && m.key.trim()) llm.setKey(m.key); if (m.useLive && llm.apiKey) llm.setMode('live'); broadcast({ type: 'settings', settings: settings() }); break; }
-        case 'setMode': if (m.mode === 'cli') await llm.cliCheck(); llm.setMode(m.mode); broadcast({ type: 'settings', settings: settings() }); break;
+        case 'setMode': if (m.mode === 'cli') await llm.cliCheck(); llm.setMode(m.mode); broadcast({ type: 'settings', settings: settings() }); if (m.mode !== 'mock') testConnection(ws); break;
+        case 'testLlm': testConnection(ws); break;
         case 'cliScan': try { await llm.cliScan(); saveCliPrefs(); send(ws, { type: 'toast', text: `Found ${llm.cliInfo.servers.length} connector(s) on your Claude account.`, level: 'info' }); } catch (e) { send(ws, { type: 'toast', text: e.message, level: 'warn' }); } broadcast({ type: 'settings', settings: settings() }); break;
         case 'cliConnector': llm.setCliConnector(String(m.name), !!m.on); saveCliPrefs(); broadcast({ type: 'settings', settings: settings() }); break;
         case 'answerRequest': company.answerRequest(String(m.id), { text: String(m.text || ''), files: m.files, decline: !!m.decline }); break;

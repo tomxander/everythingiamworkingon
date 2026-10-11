@@ -180,7 +180,7 @@ export class Company extends EventEmitter {
         for (const s of task.subtasks) {
           if (started.has(s.id)) continue;
           const failedDep = s.deps.some((d) => task.subtasks[d]?.status === 'failed');
-          if (failedDep) { s.status = 'failed'; started.add(s.id); continue; }
+          if (failedDep) { s.status = 'failed'; s.error = `Skipped because a workstream it builds on failed (${task.subtasks[s.deps.find((d) => task.subtasks[d]?.status === 'failed')]?.skill || 'upstream'}).`; started.add(s.id); continue; }
           if (s.deps.every((d) => task.subtasks[d]?.status === 'done')) {
             started.add(s.id); s.status = 'ready';
             this.runSubtask(task, s).catch(async (e) => {
@@ -198,7 +198,12 @@ export class Company extends EventEmitter {
     this.schedulers.delete(task.id);
 
     const doneSubs = task.subtasks.filter((s) => s.status === 'done');
-    if (!doneSubs.length) { task.status = 'failed'; task.error = task.error || 'All workstreams failed.'; this.pushTask(task); return; }
+    if (!doneSubs.length) {
+      // say WHY: the most common error, and (for real models) a connection test that separates a bad key, a bad model or an old CLI from a one-off failure
+      const errs = task.subtasks.map((s) => s.error).filter((e) => e && !/^Skipped/.test(e)); const top = [...new Set(errs)].sort((a, b) => errs.filter((x) => x === b).length - errs.filter((x) => x === a).length)[0];
+      let diag = ''; if (this.llm.mode !== 'mock') { const r = await this.llm.test(); diag = r.ok ? `\nA connection test just now succeeded (${r.text}), so this looks like a one-off. Press Retry.` : `\nConnection test: ${r.error}`; }
+      task.status = 'failed'; task.error = task.error || `All workstreams failed.${top ? `\nMost common error: ${top}` : ''}${diag}`; this.pushTask(task); this.addLog(`${task.id} failed: ${clip(task.error, 200)}`, { type: 'task', taskId: task.id }); return;
+    }
 
     // review & synthesis by Vera
     task.status = 'review'; this.pushTask(task);

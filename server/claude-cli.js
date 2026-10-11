@@ -89,7 +89,7 @@ export class ClaudeCli {
    * `builtin`: which built-in tools exist at all ('' for none, 'WebSearch').
    */
   async run({ system, user, model, allowed = [], mcp = null, builtin = '', maxTurns = 4, timeoutMs = TIMEOUT_MS }) {
-    await this.slot(); const dir = fs.mkdtempSync(path.join(os.tmpdir(), '4evr-cli-'));
+    this.lastModel = model; await this.slot(); const dir = fs.mkdtempSync(path.join(os.tmpdir(), '4evr-cli-'));
     try {
       fs.writeFileSync(path.join(dir, 'system.txt'), system || 'You are a helpful assistant.');
       const args = ['-p', '--output-format', 'json', '--no-session-persistence', '--permission-mode', 'dontAsk', '--max-turns', String(maxTurns), '--system-prompt-file', path.join(dir, 'system.txt'), '--tools', builtin];
@@ -109,6 +109,8 @@ export class ClaudeCli {
   explain(text, code) {
     const t = String(text || '').slice(0, 400);
     if (/not logged in|please run \/login|authenticat|credential|oauth|401/i.test(t)) return 'The Claude CLI is not signed in. Run `claude` once in a terminal and sign in with your account, then try again.';
+    if (/unknown option|unrecognized option|unknown argument|invalid option|invalid value for/i.test(t)) return `Your installed Claude Code does not support an option this mode needs (${t.slice(0, 160)}). Update it with: npm install -g @anthropic-ai/claude-code@latest`;
+    if (/model.*(not found|does not exist|invalid)|not_found/i.test(t)) return `The model "${this.lastModel || 'configured model'}" is not available to this account: ${t.slice(0, 200)}. Set a different one in Settings.`;
     if (/rate limit|usage limit|limit reached|overloaded/i.test(t)) return `Your Claude account hit a usage limit: ${t}`;
     return `The Claude CLI failed (exit ${code}): ${t || 'no output'}`;
   }

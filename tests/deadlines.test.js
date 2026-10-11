@@ -3,13 +3,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 process.env.API_TIMEOUT_MS = '400'; process.env.INTAKE_TIMEOUT_S = '0.4'; process.env.PLAN_TIMEOUT_S = '0.4';
-process.env.ALLOW_PRIVATE_FETCH = '1'; process.env.SEARCH_GAP_MS = '0';
+process.env.TEST_TIMEOUT_S = '2'; process.env.ALLOW_PRIVATE_FETCH = '1'; process.env.SEARCH_GAP_MS = '0';
 
 let behaviour = 'hang'; const bodies = [];
 const api = http.createServer((req, res) => {
   let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => {
     const j = JSON.parse(b || '{}'); bodies.push(j); const sys = JSON.stringify(j.system || '');
     if (behaviour === 'hang') return; // never answers
+    if (behaviour === 'dead') { res.statusCode = 401; res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ error: { message: 'invalid x-api-key' } })); }
     const reply = (text) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ stop_reason: 'end_turn', content: [{ type: 'text', text }], usage: { input_tokens: 10, output_tokens: 10 } })); };
     if (/writing the intake brief/.test(sys)) {
       if (behaviour === 'prose' && j.tools) return reply('I looked into Acsia Technologies. It is an automotive software company in Technopark. Here is my thinking about the objective and what to ask.');
@@ -47,4 +48,24 @@ test('an intake answered in prose is retried once, plainly, and the model\'s rea
   assert.equal(intakeCalls.length, 2); assert.ok(intakeCalls[0].tools && !intakeCalls[1].tools, 'the retry has no tools');
   assert.match(intakeCalls[1].messages[0].content, /JSON object only/);
   assert.ok(!(t.warnings || []).some((x) => /intake/i.test(x)), 'no warning once the retry worked');
+});
+
+test('when every workstream fails, the card says why and runs a connection test instead of just "failed"', async () => {
+  behaviour = 'dead'; const w = live();
+  const t = w.company.submitTask({ title: 'Learn about Acsia Technologies Pvt. Ltd.', brief: '' });
+  const end = Date.now() + 60000; while (Date.now() < end && t.status !== 'failed') { w.sim.tick(0.1); await new Promise((r) => setTimeout(r, 20)); }
+  assert.equal(t.status, 'failed');
+  assert.ok(t.subtasks.length && t.subtasks.every((s) => s.status === 'failed' && s.error), 'each workstream carries an error');
+  assert.ok(t.subtasks.some((s) => /invalid x-api-key/.test(s.error)), 'the real cause is on the workstreams that ran');
+  assert.match(t.error, /All workstreams failed/); assert.match(t.error, /Most common error: .*invalid x-api-key/); assert.match(t.error, /Connection test: .*invalid x-api-key/);
+  assert.ok(t.warnings.some((x) => /intake call failed/i.test(x)));
+});
+
+test('the connection test passes on a working model and reports exactly what is wrong otherwise', async () => {
+  const w = live(); behaviour = 'dead'; let r = await w.llm.test(); assert.equal(r.ok, false); assert.match(r.error, /invalid x-api-key/);
+  behaviour = 'ok-pong'; const orig = api.listeners('request')[0]; api.removeAllListeners('request');
+  api.on('request', (req, res) => { req.resume(); req.on('end', () => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'pong' }], usage: { input_tokens: 5, output_tokens: 1 } })); }); });
+  r = await w.llm.test(); assert.equal(r.ok, true); assert.match(r.text, /Connected/);
+  api.removeAllListeners('request'); api.on('request', orig);
+  const m = world(); assert.equal((await m.llm.test()).simulated, true);
 });

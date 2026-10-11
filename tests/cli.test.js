@@ -93,3 +93,12 @@ test('a request is looked up in connected tools first; found data answers it wit
   await new Promise((r) => setTimeout(r, 800)); assert.equal(r3.status, 'open', 'no lookup when connectors are off');
   reset();
 });
+
+test('the connection test covers sign-in, the tool bridge, and an out-of-date CLI', async () => {
+  reset(); const l = await ready();
+  process.env.FAKE_RESULT = 'pong'; let r = await l.test(); assert.equal(r.ok, false); assert.match(r.error, /did not use the local tool bridge/); assert.match(r.error, /npm install -g @anthropic-ai\/claude-code@latest/);
+  process.env.FAKE_CALL = 'ping'; r = await l.test(); assert.equal(r.ok, true); assert.match(r.text, /tool bridge works/);
+  reset(); process.env.FAKE_FAIL = 'auth'; r = await l.test(); assert.equal(r.ok, false); assert.match(r.error, /not signed in/);
+  reset(); assert.match(l.cli.explain("error: unknown option '--system-prompt-file'", 1), /does not support an option[\s\S]*npm install -g/);
+  assert.match(l.cli.explain('model: claude-x not found', 1), /not available to this account/);
+});
