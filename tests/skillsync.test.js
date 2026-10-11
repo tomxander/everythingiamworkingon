@@ -99,7 +99,7 @@ test('auto mode: a newer upstream commit is fetched, validated, layered over the
   const r = await sync.check({ force: true });
   assert.equal(r.result, 'updated'); assert.deepEqual(r.added, ['marine-logistics']); assert.ok(r.changed.includes('seo-audit') && r.changed.includes('copywriting'));
   assert.ok(ref['marine-logistics'] && ref === skills, 'the same object every agent holds was updated in place');
-  assert.match(skills['seo-audit'].body, /NEW upstream guidance/); assert.deepEqual(skills['seo-audit'].references, ['checklist.md']);
+  assert.match(skills['seo-audit'].body, /NEW upstream guidance/); assert.deepEqual(skills['seo-audit'].references, ['references/checklist.md']);
   assert.ok(skills.ads, 'a skill missing upstream is kept, not deleted'); assert.deepEqual(r.removed, ['ads']);
   assert.ok(!fs.existsSync(path.join(dataDir, 'skills-upstream', 'skills', 'xxxxx')), 'scripts and non-markdown files are never written');
   assert.match(fs.readFileSync(path.join(baseDir, 'seo-audit', 'SKILL.md'), 'utf8'), /OLD vendored/, 'the vendored copy is never modified');

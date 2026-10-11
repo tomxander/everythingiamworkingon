@@ -10,7 +10,7 @@ const finish = (w, t, max = 3000) => run(w.sim, () => ['done', 'failed'].include
 test('the org chart is coherent: every agent has a team lead, leads report to the CMO', () => {
   const byId = Object.fromEntries(AGENTS.map((a) => [a.id, a]));
   for (const a of AGENTS) {
-    if (a.id === 'vera') { assert.equal(a.reportsTo, null); continue; }
+    if (a.id === 'vera' || a.id === 'nia') { assert.equal(a.reportsTo, null, `${a.id} reports to God`); continue; }
     assert.ok(byId[a.reportsTo], `${a.id} reports to a real person`);
     if (!a.lead) assert.ok(byId[a.reportsTo].lead, `${a.id} reports to a team lead`);
     else assert.equal(a.reportsTo, 'vera');

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { buildMap, TILE } from './map.js';
 import { AGENTS, COMPANY, DEPT_META } from './roster.js';
-import { loadSkills, skillIndex, SKILLS_DIR } from './skills.js';
+import { loadSkills, skillIndex, SKILLS_DIR, HR_SKILLS_DIR } from './skills.js';
 import { SkillSync } from './skillsync.js';
 import { Sim } from './sim.js';
 import { Life } from './life.js';
@@ -23,18 +23,20 @@ const DELIV = process.env.DELIVERABLES_DIR || path.join(root, 'deliverables');
 
 const map = buildMap();
 // The skills library: the vendored copy, with anything newer fetched from the upstream repo layered on top.
-let vendoredCommit = null;
-try { vendoredCommit = JSON.parse(fs.readFileSync(path.join(SKILLS_DIR, '..', '.upstream.json'), 'utf8')).commit; } catch { /* unknown, fine */ }
+const vendored = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, '..', '.upstream.json'), 'utf8')).commit; } catch { return null; } };
 const skills = {};
-const skillSync = new SkillSync({ skills, baseDir: SKILLS_DIR, dataDir: DATA, vendoredCommit });
-Object.assign(skills, loadSkills(skillSync.dirs));
+const skillSyncs = [
+  new SkillSync({ id: 'marketing', skills, baseDir: SKILLS_DIR, dataDir: DATA, vendoredCommit: vendored(SKILLS_DIR) }),
+  new SkillSync({ id: 'hr', skills, baseDir: HR_SKILLS_DIR, dataDir: DATA, vendoredCommit: vendored(HR_SKILLS_DIR) }),
+];
+Object.assign(skills, loadSkills(skillSyncs.flatMap((s) => s.dirs)));
 const llm = new LLM();
 const sim = new Sim(map, AGENTS);
 const company = new Company({ sim, llm, skills, dataDir: DATA, deliverablesDir: DELIV });
 const life = new Life(sim, company);
 company.life = life;
 company.skillIndexFn = () => skillIndex(skills);
-company.attachSkillSync(skillSync);
+for (const ss of skillSyncs) company.attachSkillSync(ss);
 const restored = company.load();
 life.start();
 
@@ -85,7 +87,7 @@ company.on('broadcast', broadcast);
 
 function settings() {
   const s = llm.status();
-  return { mode: s.mode, hasKey: s.hasKey, model: s.model, price: s.price, budgetCap: company.budgetCap, lastError: s.lastError, collab: company.collab, hiring: company.hiringMode, learning: company.kb.mode, webResearch: company.webResearch, skills: skillSync.status() };
+  return { mode: s.mode, hasKey: s.hasKey, model: s.model, price: s.price, budgetCap: company.budgetCap, lastError: s.lastError, collab: company.collab, hiring: company.hiringMode, learning: company.kb.mode, webResearch: company.webResearch, skills: company.skillsStatus() };
 }
 
 function initPayload() {
@@ -97,7 +99,7 @@ function initPayload() {
     kb: { summary: company.kb.summary(), lessons: company.kb.view(250), playbooks: company.kb.playbooks, notes: company.kb.notes.slice(0, 30), events: company.kb.events.slice(-20) },
     hiring: company.hiringStatus(),
     depts: DEPT_META,
-    skills: skillIndex(skills), skillsSource: skillSync.status(),
+    skills: skillIndex(skills), skillsSource: company.skillsStatus(),
     tasks: [...company.tasks.values()].map((t) => company.publicTask(t)),
     deliverables: [...company.deliverables.values()].map((d) => company.deliverableMeta(d)),
     comms: company.comms.slice(-200), log: company.log.slice(-200),
@@ -132,11 +134,11 @@ wss.on('connection', (ws) => {
         case 'hireDecision': company.decideHire(m.id, !!m.ok); break;
         case 'kbForget': company.kb.remove(m.id); break;
         case 'kbPin': company.kb.pin(m.id, m.value !== false); break;
-        case 'skillsCheck': skillSync.check({ force: true, reason: 'manual' }).then((r) => { broadcast({ type: 'settings', settings: settings() }); send(ws, { type: 'toast', text: r.result === 'up-to-date' ? 'The skills library is up to date.' : r.result === 'error' ? `Could not check for updates: ${r.error}` : `Skills: ${r.result}`, level: r.result === 'error' ? 'warn' : 'info' }); }); break;
-        case 'skillsApprove': skillSync.approve(); broadcast({ type: 'settings', settings: settings() }); break;
-        case 'skillsDecline': skillSync.decline(); broadcast({ type: 'settings', settings: settings() }); break;
-        case 'skillsRollback': skillSync.rollback(); broadcast({ type: 'settings', settings: settings() }); break;
-        case 'setSkillsMode': skillSync.mode = ['auto', 'ask', 'off'].includes(m.value) ? m.value : skillSync.mode; broadcast({ type: 'settings', settings: settings() }); break;
+        case 'skillsCheck': Promise.all(skillSyncs.filter((s) => !m.id || s.id === m.id).map((s) => s.check({ force: true, reason: 'manual' }))).then((rs) => { broadcast({ type: 'settings', settings: settings() }); const err = rs.find((r) => r.result === 'error'); send(ws, { type: 'toast', text: err ? `Could not check for updates: ${err.error}` : rs.every((r) => r.result === 'up-to-date') ? 'The skills libraries are up to date.' : `Skills: ${rs.map((r) => r.result).join(', ')}`, level: err ? 'warn' : 'info' }); }); break;
+        case 'skillsApprove': for (const s of skillSyncs) if (!m.id || s.id === m.id) s.approve(); broadcast({ type: 'settings', settings: settings() }); break;
+        case 'skillsDecline': for (const s of skillSyncs) if (!m.id || s.id === m.id) s.decline(); broadcast({ type: 'settings', settings: settings() }); break;
+        case 'skillsRollback': for (const s of skillSyncs) if (!m.id || s.id === m.id) s.rollback(); broadcast({ type: 'settings', settings: settings() }); break;
+        case 'setSkillsMode': for (const s of skillSyncs) s.mode = ['auto', 'ask', 'off'].includes(m.value) ? m.value : s.mode; broadcast({ type: 'settings', settings: settings() }); break;
         case 'setBudget': company.budgetCap = Math.max(0.1, Number(m.value) || 5); broadcast({ type: 'settings', settings: settings() }); break;
         case 'deliverable': { const d = company.deliverables.get(m.id); if (d) send(ws, { type: 'deliverable_full', deliverable: d }); break; }
         case 'skill': { const s = skills[m.name]; if (s) send(ws, { type: 'skill_full', skill: { name: s.name, title: s.title, description: s.description, body: s.body, references: s.references } }); break; }
@@ -155,8 +157,8 @@ setInterval(() => { if (wss.clients.size) broadcast({ type: 'tick', snapshot: si
 setInterval(() => { company.sampleHistory(); if (wss.clients.size) broadcast({ type: 'stats', stats: company.stats(), settings: settings() }); }, 2000);
 setInterval(() => company.save(), 20000);
 // look for newer playbooks shortly after start and every six hours (hiring also checks, throttled to every ten minutes)
-setTimeout(() => skillSync.check({ reason: 'startup' }), 45_000).unref();
-setInterval(() => skillSync.check({ reason: 'scheduled' }), 6 * 3600 * 1000).unref();
+setTimeout(() => company.refreshSkills('startup'), 45_000).unref();
+setInterval(() => company.refreshSkills('scheduled'), 6 * 3600 * 1000).unref();
 let kbSent = -1;
 setInterval(() => { if (wss.clients.size && company.kb.version !== kbSent) { kbSent = company.kb.version; broadcast({ type: 'kb', kb: { summary: company.kb.summary(), lessons: company.kb.view(250), playbooks: company.kb.playbooks, notes: company.kb.notes.slice(0, 30), events: company.kb.events.slice(-20) } }); } }, 2500);
 

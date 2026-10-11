@@ -13,7 +13,7 @@ import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { rawGet } from './tools.js';
-import { loadSkills, reloadSkills } from './skills.js';
+import { loadSkills, reloadSkills, REF_DIRS } from './skills.js';
 
 const MAX_ARCHIVE = 40 * 1024 * 1024;     // compressed download
 const MAX_UNPACKED = 80 * 1024 * 1024;    // after gunzip
@@ -72,7 +72,7 @@ export function extractSkills(tgz) {
     if (parts.some((p) => p === '..' || p === '.' || p.includes('\0') || p.includes('\\'))) { rejected.push({ path: e.name, why: 'unsafe path' }); continue; }
     const name = parts[2]; const rel = parts.slice(3).join('/');
     if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) { rejected.push({ path: e.name, why: 'invalid skill name' }); continue; }
-    const isSkill = rel === 'SKILL.md'; const isRef = /^references\/[A-Za-z0-9._-]+\.md$/.test(rel);
+    const isSkill = rel === 'SKILL.md'; const isRef = new RegExp(`^(${REF_DIRS.join('|')})/[A-Za-z0-9._-]+\\.md$`).test(rel);
     if (!isSkill && !isRef) continue; // only markdown playbooks; scripts, binaries and everything else are ignored
     if (e.data.length > (isSkill ? MAX_SKILL_MD : MAX_REF_MD)) { rejected.push({ path: e.name, why: 'file too large' }); continue; }
     if (++files > MAX_FILES) throw new Error('The archive has too many skill files.');
@@ -94,22 +94,25 @@ export function extractSkills(tgz) {
 
 // ---------------------------------------------------------------- sync
 export class SkillSync extends EventEmitter {
-  constructor({ skills, baseDir, dataDir, repo, branch, mode, apiBase, archiveBase, vendoredCommit, trustBases = false } = {}) {
+  constructor({ id = 'marketing', skills, baseDir, dataDir, repo, branch, mode, apiBase, archiveBase, vendoredCommit, trustBases = false } = {}) {
     super();
+    this.id = id; // which library this syncs: 'marketing' or 'hr'
     this.skills = skills; this.baseDir = baseDir; this.dataDir = dataDir;
-    this.repo = repo || process.env.SKILLS_REPO || 'coreyhaines31/marketingskills';
+    this.repo = repo || (id === 'hr' ? process.env.HR_SKILLS_REPO || 'tuanductran/hr-skills' : process.env.SKILLS_REPO || 'coreyhaines31/marketingskills');
     if (!/^[\w.-]+\/[\w.-]+$/.test(this.repo)) throw new Error('SKILLS_REPO must look like owner/name.');
-    this.branch = branch || process.env.SKILLS_BRANCH || 'main';
+    this.branch = branch || (id === 'hr' ? process.env.HR_SKILLS_BRANCH : process.env.SKILLS_BRANCH) || 'main';
     this.mode = mode || process.env.SKILLS_UPDATE || 'auto'; // auto | ask | off
     this.apiBase = apiBase || process.env.SKILLS_API_BASE || 'https://api.github.com';
     this.archiveBase = archiveBase || process.env.SKILLS_ARCHIVE_BASE || 'https://codeload.github.com';
-    this.overlay = path.join(dataDir, 'skills-upstream'); this.prev = path.join(dataDir, 'skills-upstream.prev');
+    const tag = id === 'marketing' ? 'skills-upstream' : `skills-upstream-${id}`;
+    this.overlay = path.join(dataDir, tag); this.prev = path.join(dataDir, `${tag}.prev`);
     this.vendoredCommit = vendoredCommit || null;
     this.trustBases = trustBases || !!(process.env.SKILLS_API_BASE || process.env.SKILLS_ARCHIVE_BASE); // an operator-chosen base URL (or a test) is trusted; the defaults are pinned to GitHub
     this.meta = this.readMeta(this.overlay); this.pending = null; this.lastCheck = 0; this.lastError = null; this.lastResult = null; this.busy = null;
   }
 
-  get dirs() { return [this.baseDir, path.join(this.overlay, 'skills')]; }
+  get dirs() { return [{ dir: this.baseDir, source: this.id }, { dir: path.join(this.overlay, 'skills'), source: this.id }]; }
+  ownSkills() { return Object.keys(this.skills).filter((n) => (this.skills[n].source || 'marketing') === this.id); }
   get commit() { return this.meta?.commit || this.vendoredCommit; }
   readMeta(dir) { try { return JSON.parse(fs.readFileSync(path.join(dir, '.upstream.json'), 'utf8')); } catch { return null; } }
 
@@ -119,10 +122,10 @@ export class SkillSync extends EventEmitter {
 
   status() {
     return {
-      repo: this.repo, branch: this.branch, mode: this.mode, commit: this.commit ? this.commit.slice(0, 7) : null, vendoredCommit: this.vendoredCommit ? this.vendoredCommit.slice(0, 7) : null,
+      id: this.id, repo: this.repo, branch: this.branch, mode: this.mode, commit: this.commit ? this.commit.slice(0, 7) : null, vendoredCommit: this.vendoredCommit ? this.vendoredCommit.slice(0, 7) : null,
       syncedAt: this.meta?.syncedAt || null, checkedAt: this.lastCheck || null, lastError: this.lastError, canRollback: fs.existsSync(path.join(this.prev, 'skills')) || !!this.meta,
       pending: this.pending ? { commit: this.pending.commit.slice(0, 7), added: this.pending.changes.added, changed: this.pending.changes.changed, removed: this.pending.changes.removed } : null,
-      last: this.lastResult, skillCount: Object.keys(this.skills).length,
+      last: this.lastResult, skillCount: this.ownSkills().length,
     };
   }
 
@@ -158,7 +161,7 @@ export class SkillSync extends EventEmitter {
       if (!Object.keys(up).length) throw new Error('The archive contained no valid skills, so nothing was changed.');
       const changes = { added: [], changed: [], removed: [] };
       for (const [n, s] of Object.entries(up)) { if (!this.skills[n]) changes.added.push(n); else if (this.skills[n].hash !== s.hash) changes.changed.push(n); }
-      for (const n of Object.keys(this.skills)) if (!up[n]) changes.removed.push(n); // kept locally: upstream removal does not delete a working playbook
+      for (const n of this.ownSkills()) if (!up[n]) changes.removed.push(n); // kept locally: upstream removal does not delete a working playbook
       const pkg = { commit: sha, up, changes, rejected, reason };
       if (this.mode === 'ask' && (changes.added.length || changes.changed.length)) { this.pending = pkg; this.lastResult = { result: 'update-available', commit: sha.slice(0, 7), ...changes, rejected: rejected.length }; this.emit('pending', this.status()); return this.lastResult; }
       return this.apply(pkg);
@@ -196,7 +199,7 @@ export class SkillSync extends EventEmitter {
     fs.rmSync(this.overlay, { recursive: true, force: true });
     if (fs.existsSync(this.prev)) fs.renameSync(this.prev, this.overlay);
     this.meta = this.readMeta(this.overlay);
-    const diff = reloadSkills(this.skills, this.dirs, { prune: true });
+    const diff = reloadSkills(this.skills, this.dirs, { prune: true, source: this.id });
     this.lastResult = { result: 'rolled-back', commit: (this.commit || '').slice(0, 7), changed: diff.changed, removed: diff.removed, added: diff.added };
     this.emit('updated', { ...this.lastResult, status: this.status() });
     return { rolledBack: !!had, ...this.lastResult };

@@ -132,10 +132,26 @@ export const AGENTS = [
     quirks: ['What is the story a journalist would actually write?', 'Warm intro beats cold pitch.', 'News hook. Find the news hook.', 'Partnerships are two-way streets.'],
     look: { skin: '#7a4a2a', hair: '#a21caf', hairStyle: 3, shirt: '#d946ef', pants: '#1e1b4b', extra: 'none' },
   },
+  {
+    id: 'nia', lead: true, reportsTo: null, short: 'Nia', name: 'Nia Abara', role: 'Head of People & Talent', dept: 'people', room: 'people', slot: 0,
+    color: '#8be0b8', emoji: 'badge', domains: ['hr', 'recruiting'],
+    skills: ['hr-workforce-planning', 'hr-talent-acquisition', 'hr-onboarding', 'hr-offboarding', 'hr-performance-management', 'hr-job-description', 'hr-organizational-design', 'hr-competency-management', 'hr-employer-branding'],
+    persona: 'Warm, fair and exact. Runs the people function for a team made of AI agents: she applies the structure of the HR playbooks (job descriptions, onboarding plans, reviews, workforce plans) and drops anything that only makes sense for human employees, such as payroll, labour law or benefits. Never decides a release alone; God does.',
+    quirks: ['Who is this role for, and what does good look like in 90 days?', 'Facts first, then feedback.', 'Do we need a hire, or a handoff?', 'Every hire gets a plan.'],
+    look: { skin: '#8d5a3b', hair: '#1f1a17', hairStyle: 2, shirt: '#34d399', pants: '#1f2937', extra: 'none' },
+  },
+  {
+    id: 'tomas', lead: false, reportsTo: 'nia', short: 'Tomas', name: 'Tomás Lindqvist', role: 'Talent Intelligence & Skills Analyst', dept: 'people', room: 'people', slot: 1,
+    color: '#6ee7b7', emoji: 'graph', domains: ['skills-data'],
+    skills: ['hr-skills-intelligence', 'hr-skills-taxonomy', 'hr-workforce-forecasting', 'hr-analytics', 'hr-talent-mapping', 'hr-recruitment-marketing', 'hr-candidate-experience'],
+    persona: 'Quiet librarian of the skills library. Knows which skill each person owns, which are unowned, and what changed upstream. Reports numbers, labels estimates, never rounds in his own favour.',
+    quirks: ['Coverage is a map, not a feeling.', 'Which skill is nobody holding?', 'Show the denominator.', 'Utilisation above 85% is a hiring signal.'],
+    look: { skin: '#f1d3b5', hair: '#a8744a', hairStyle: 0, shirt: '#10b981', pants: '#374151', extra: 'glasses' },
+  },
 ];
 
 // Who leads each team. Work and feedback flow through leads before they reach the CMO.
-export const TEAM_LEADS = { strategy: 'vera', content: 'rafa', creative: 'zuri', growth: 'nadia', lifecycle: 'oskar', revenue: 'harper' };
+export const TEAM_LEADS = { strategy: 'vera', content: 'rafa', creative: 'zuri', growth: 'nadia', lifecycle: 'oskar', revenue: 'harper', people: 'nia' };
 
 export const DEPT_META = {
   strategy: { label: 'Strategy', color: '#f5c542' },
@@ -144,4 +160,5 @@ export const DEPT_META = {
   growth: { label: 'Growth & Data', color: '#f87171' },
   lifecycle: { label: 'Lifecycle & Paid', color: '#a3e635' },
   revenue: { label: 'Revenue & Reach', color: '#fcd34d' },
+  people: { label: 'People & Talent', color: '#8be0b8' },
 };

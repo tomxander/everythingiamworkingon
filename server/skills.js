@@ -7,6 +7,9 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const SKILLS_DIR = process.env.SKILLS_DIR || path.join(here, '..', 'vendor', 'marketingskills', 'skills');
+export const HR_SKILLS_DIR = process.env.HR_SKILLS_DIR || path.join(here, '..', 'vendor', 'hr-skills', 'skills');
+// subfolders of a skill that hold reference material an agent can open on demand (marketingskills: references/, hr-skills: content/ examples/ prompts/)
+export const REF_DIRS = ['references', 'content', 'examples', 'prompts'];
 
 function parseFrontmatter(raw) {
   const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
@@ -19,22 +22,26 @@ function parseFrontmatter(raw) {
   return { meta, body: m[2] };
 }
 
-/** Load skills from one or more directories. Later directories override earlier ones (the upstream overlay wins over the vendored copy). */
-export function loadSkills(dirs = SKILLS_DIR) {
+/**
+ * Load skills from one or more layers: a directory, or { dir, source }. Later layers override earlier ones
+ * (an upstream overlay wins over the vendored copy). `source` says which library a skill belongs to.
+ */
+export function loadSkills(layers = SKILLS_DIR) {
   const skills = {};
-  for (const dir of [].concat(dirs)) {
+  for (const layer of [].concat(layers)) {
+    const dir = typeof layer === 'string' ? layer : layer?.dir; const source = (typeof layer === 'object' && layer?.source) || 'marketing';
     if (!dir || !fs.existsSync(dir)) continue;
     for (const name of fs.readdirSync(dir).sort()) {
       const file = path.join(dir, name, 'SKILL.md');
       if (!fs.existsSync(file)) continue;
       const raw = fs.readFileSync(file, 'utf8');
       const { meta, body } = parseFrontmatter(raw);
-      const refDir = path.join(dir, name, 'references');
-      const references = fs.existsSync(refDir) ? fs.readdirSync(refDir).filter((f) => f.endsWith('.md')).sort() : [];
+      const references = [];
+      for (const sub of REF_DIRS) { const refDir = path.join(dir, name, sub); if (fs.existsSync(refDir)) for (const f of fs.readdirSync(refDir).sort()) if (f.endsWith('.md')) references.push(`${sub}/${f}`); }
       const title = (body.match(/^#\s+(.+)$/m) || [null, name])[1].trim();
       const description = (meta.description || '').trim();
       skills[name] = {
-        name, title, description,
+        name, title, description, source,
         summary: description.replace(/^When the user (wants to )?/i, '').split(/\. /)[0].slice(0, 140),
         body, references, dir: path.join(dir, name), hash: crypto.createHash('sha1').update(raw).digest('hex').slice(0, 12),
       };
@@ -44,10 +51,10 @@ export function loadSkills(dirs = SKILLS_DIR) {
 }
 
 /** Refresh `target` in place from disk, so everything holding a reference sees the update. */
-export function reloadSkills(target, dirs, { prune = false } = {}) {
-  const fresh = loadSkills(dirs); const added = [], changed = [], removed = [];
+export function reloadSkills(target, layers, { prune = false, source = null } = {}) {
+  const fresh = loadSkills(layers); const added = [], changed = [], removed = [];
   for (const [k, v] of Object.entries(fresh)) { if (!target[k]) added.push(k); else if (target[k].hash !== v.hash) changed.push(k); target[k] = v; }
-  if (prune) for (const k of Object.keys(target)) if (!fresh[k]) { removed.push(k); delete target[k]; }
+  if (prune) for (const k of Object.keys(target)) if (!fresh[k] && (!source || target[k].source === source)) { removed.push(k); delete target[k]; } // only prune the library that was rolled back
   return { added, changed, removed };
 }
 
@@ -98,5 +105,5 @@ export function rankSkills(skills, text, limit = 5, universe = skills) {
 }
 
 export function skillIndex(skills) {
-  return Object.values(skills).map((s) => ({ name: s.name, title: s.title, summary: s.summary, references: s.references.length }));
+  return Object.values(skills).map((s) => ({ name: s.name, title: s.title, summary: s.summary, references: s.references.length, source: s.source || 'marketing' }));
 }

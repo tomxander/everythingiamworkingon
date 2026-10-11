@@ -276,7 +276,7 @@ export function searchToText(query, results) { return wrapUntrusted(`search: ${q
 export const TOOL_DEFS = [
   { name: 'fetch_url', description: 'Fetch and read a public web page. Returns the title, meta description, headings, calls to action, forms, detected tracking and the main text. Use it to verify facts about the client, their pages or competitors instead of guessing. Only public http(s) pages work.', input_schema: { type: 'object', properties: { url: { type: 'string', description: 'The full URL or domain to read.' } }, required: ['url'] } },
   { name: 'web_search', description: 'Search the internet. Returns titles, URLs and snippets. Use it for competitors, benchmarks, market facts, tools, recent news and best practice. Then read the promising results with fetch_url before relying on them.', input_schema: { type: 'object', properties: { query: { type: 'string', description: 'A specific search query.' } }, required: ['query'] } },
-  { name: 'read_skill_reference', description: 'Read one of the reference files that belongs to your active skill (they are listed at the end of the skill text). Use when the skill tells you to consult a reference.', input_schema: { type: 'object', properties: { file: { type: 'string', description: 'The reference file name, for example "benchmarks.md".' } }, required: ['file'] } },
+  { name: 'read_skill_reference', description: 'Read one of the reference files that belongs to your active skill (they are listed at the end of the skill text, for example "references/benchmarks.md" or "content/guide.md"). Use when the skill tells you to consult a reference or you want a worked example or prompt.', input_schema: { type: 'object', properties: { file: { type: 'string', description: 'The reference path as listed, for example "content/guide.md".' } }, required: ['file'] } },
 ];
 
 /** extra: { toolName: async (input) => string } adds company-level tools (ask_teammate, request_hire, ...). */
@@ -293,9 +293,11 @@ export function makeToolHandler({ skill, log, extra = {} }) {
       try { const r = await webSearch(input.query); log?.(`Searched the web: "${clip(String(input.query), 70)}"`); return searchToText(input.query, r); } catch (e) { log?.(`Search failed: ${e.message}`); return `${e.message}. Say clearly in your deliverable that this could not be verified.`; }
     }
     if (name === 'read_skill_reference') {
-      const file = path.basename(String(input.file || ''));
-      if (!skill || !skill.references.includes(file)) return `No such reference. Available: ${(skill?.references || []).join(', ') || 'none'}.`;
-      try { return clip(fs.readFileSync(path.join(skill.dir, 'references', file), 'utf8'), 14000); } catch { return 'Could not read that reference.'; }
+      // accept "content/guide.md" or just "guide.md"; only files listed for this skill can be opened
+      const want = String(input.file || '').replace(/^\.?\/+/, '');
+      const rel = skill?.references.find((r) => r === want || r.endsWith(`/${path.basename(want)}`) && path.basename(want) === path.basename(r));
+      if (!skill || !rel) return `No such reference. Available: ${(skill?.references || []).join(', ') || 'none'}.`;
+      try { return clip(fs.readFileSync(path.join(skill.dir, rel), 'utf8'), 14000); } catch { return 'Could not read that reference.'; }
     }
     return `Unknown tool: ${name}`;
   };

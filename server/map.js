@@ -3,7 +3,7 @@
 
 export const TILE = 16;
 export const W = 48;
-export const H = 41;
+export const H = 49;
 
 const ROOMS = [
   // row A (doors on the bottom wall, facing the hub)
@@ -18,7 +18,9 @@ const ROOMS = [
   // bottom lounge
   { id: 'lounge', name: 'The Lounge', x: 0, y: 24, w: 48, h: 7, floor: 'lounge', doors: ['top'] },
   // where new hires sit: 16 desks ready for the people the team brings in
-  { id: 'annex', name: 'The Annex', x: 0, y: 30, w: 48, h: 11, floor: 'annex', doors: ['top'] },
+  { id: 'annex', name: 'The Annex', x: 0, y: 30, w: 48, h: 11, floor: 'annex', doors: ['top', 'bottom'] },
+  // HR: the people team, below the Annex where new hires arrive from
+  { id: 'people', name: 'People & Talent', x: 0, y: 40, w: 48, h: 9, floor: 'people', doors: ['top'] },
 ];
 
 const HUB = { id: 'hub', name: 'Town Hall', x: 1, y: 11, w: 46, h: 4, floor: 'hub' };
@@ -253,6 +255,27 @@ export function buildMap() {
     spots.welcome = { tx: 23, ty: 35 };
   }
 
+  // People & Talent: Nia and Tomas' desks, workforce boards and an interview table
+  {
+    const r = room.people; const { ix, iy, iw, ih } = interior(r);
+    placeDesks('people', 2, 2, { startX: ix + 2 });
+    deco('whiteboard', ix + 14, iy, 3, 1, { text: 'HEADCOUNT' });
+    deco('whiteboard', ix + 19, iy, 3, 1, { text: 'SKILLS MAP' });
+    deco('whiteboard', ix + 24, iy, 3, 1, { text: '30-60-90' });
+    deco('bookshelf', ix, iy, 2, 1); deco('bookshelf', ix + 11, iy, 2, 1);
+    deco('poster', ix + 30, iy, 1, 1, { variant: 1 });
+    const tx = ix + 20, ty = iy + 4;
+    f('roundtable', tx, ty, 4, 2);
+    spots.interview = [];
+    for (let i = 0; i < 4; i++) { deco('chair', tx + i, ty - 1); spots.interview.push({ x: tx + i + 0.5, y: ty - 0.4, tx: tx + i, ty: ty - 1, dir: 'down' }); }
+    for (let i = 0; i < 4; i++) { deco('chair', tx + i, ty + 2); spots.interview.push({ x: tx + i + 0.5, y: ty + 2.6, tx: tx + i, ty: ty + 2, dir: 'up' }); }
+    f('couch', ix + 36, iy + 1, 4, 1, { dirOut: 'down' }); deco('rug', ix + 35, iy, 6, 3, { color: 'teal' });
+    f('printer', ix + iw - 1, iy + 5, 1, 1);
+    deco('plant', ix, iy + ih - 1); deco('plant', ix + iw - 1, iy + ih - 1); deco('plant', ix + 14, iy + ih - 1);
+    spots.whiteboard_people = { tx: ix + 20, ty: iy + 1 };
+    spots.peopledoor = { tx: 23, ty: 41 };
+  }
+
   // walls: windows + brand
   deco('neon', 20, 10, 8, 1, { text: '4EVR', onWall: true });
 
@@ -266,7 +289,7 @@ export function buildMap() {
   }
   // hub doors area etc. keep desks' seat tiles walkable
   for (const list of Object.values(desks)) for (const d of list) walk[d.seat.ty][d.seat.tx] = true;
-  for (const lst of [spots.council, spots.vault]) for (const s of lst) { if (!walk[s.ty][s.tx]) walk[s.ty][s.tx] = true; }
+  for (const lst of [spots.council, spots.vault, spots.interview]) for (const s of lst) { if (!walk[s.ty][s.tx]) walk[s.ty][s.tx] = true; }
 
   // fix up single-tile spots that landed on blocked tiles by nudging to nearest walkable tile
   const nudge = (s) => {

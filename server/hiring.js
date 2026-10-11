@@ -30,7 +30,7 @@ export const hiring = {
 
   /** Why this person is needed: returns null when a hire is justified, otherwise a reason it is not. */
   hireObjection(spec, skills) {
-    if (this.skillGaps().some((g) => skills.includes(g))) return null; // the library has a playbook nobody on the team owns: a genuine capability gap
+    if (skills.some((k) => this.skillGaps(this.skills[k]?.source).includes(k))) return null; // the library has a playbook nobody on the team owns: a genuine capability gap
     const covering = [...this.sim.agents.values()].filter((x) => skills.every((k) => x.skills.includes(k)));
     if (spec.domain && !this.existingDomains().includes(String(spec.domain).toLowerCase())) return null; // new domain knowledge is a legitimate reason
     if (spec.capacity) return null;
@@ -47,14 +47,15 @@ export const hiring = {
     let skills = uniq((spec.skills || []).map(String).filter((s) => this.skills[s])).slice(0, 6);
     if (!skills.length) { // the need was described, not named: find the playbook(s) in the library that fit it
       const need = `${spec.role || ''} ${spec.need || ''} ${spec.why || ''} ${typeof spec.assignment === 'string' ? spec.assignment : ''}`;
-      const ranked = rankSkills(this.skills, need, 6).filter((r) => r.score >= 8);
-      const gapSet = new Set(this.skillGaps());
+      const { source, ranked } = this.rankLibraries(need);
+      const gapSet = new Set(this.skillGaps(source));
       const gaps = ranked.filter((r) => gapSet.has(r.name)); // if the library has a playbook the team lacks, the specialist is built from exactly that
       const pool = gaps.length ? gaps : ranked;
-      skills = pool.filter((r) => r.score >= pool[0].score * 0.6).slice(0, 3).map((r) => r.name);
+      skills = pool.length ? pool.filter((r) => r.score >= pool[0].score * 0.6).slice(0, 3).map((r) => r.name) : [];
     }
     if (!skills.length) throw new Error('No playbook in the skills library matches this need, so there is nothing to build a specialist from. The library is checked against its upstream repository before every hire.');
-    const gap = skills.filter((k) => this.skillGaps().includes(k));
+    const gap = skills.filter((k) => this.skillGaps(this.skills[k]?.source).includes(k));
+    const source = this.skills[skills[0]]?.source || 'marketing'; // marketing hires come from the marketing library, HR-domain hires from the HR library
     const role = clip(String(spec.role || (gap.length ? `${this.skills[gap[0]].title} Specialist` : '')).replace(/[<>`]/g, '').trim(), 60);
     if (role.length < 4) throw new Error('A hire needs a clear job title.');
     const hiredCount = [...this.sim.agents.values()].filter((a) => a.hired).length;
@@ -67,14 +68,14 @@ export const hiring = {
     const objection = this.hireObjection(spec, skills); if (objection) throw new Error(objection);
     if (this.hiringMode === 'ask') await this.awaitHireApproval(task, { ...spec, role, skills }, requesterId);
 
-    const dept = spec.dept && DEPT_META[spec.dept] ? spec.dept : this.deptForSkills(skills);
+    const dept = spec.dept && DEPT_META[spec.dept] ? spec.dept : source === 'hr' ? 'people' : this.deptForSkills(skills);
     const lead = this.agent(TEAM_LEADS[dept]) || this.agent('vera');
     const profile = await this.makeProfile(task, { role, skills, why: spec.why, domain: spec.domain, dept, lead, gap });
     const seq = ++this.seq.hire; const first = profile.first;
     const def = {
       id: `h${seq}-${first.toLowerCase().replace(/[^a-z]/g, '').slice(0, 10) || 'new'}`, short: first, name: `${first} ${profile.last}`, role, dept, room: 'annex', slot, color: DEPT_META[dept].color, emoji: 'badge',
       skills, persona: profile.persona, quirks: profile.quirks, look: randomLook(`${role}${seq}`, DEPT_META[dept].color), lead: false, reportsTo: lead.id, hired: true,
-      domains: spec.domain ? [String(spec.domain).toLowerCase().slice(0, 24)] : [], skillSource: this.skillSync ? { repo: this.skillSync.repo, commit: this.skillSync.commit ? this.skillSync.commit.slice(0, 7) : null, builtFrom: skills } : { builtFrom: skills }, hiredFor: task?.id || null, why: clip(String(spec.why || ''), 240), joined: Date.now(), by: requesterId,
+      domains: spec.domain ? [String(spec.domain).toLowerCase().slice(0, 24)] : [], skillSource: this.skillSourceFor(source, skills), hiredFor: task?.id || null, why: clip(String(spec.why || ''), 240), joined: Date.now(), by: requesterId,
     };
     const agent = this.sim.addAgent(def, { spawn: this.sim.map.spots.annexdoor });
     this.hires.set(def.id, def);
@@ -89,35 +90,62 @@ export const hiring = {
   },
 
   /** Library skills that no current teammate owns. These are the capabilities the team cannot deliver today. */
-  skillGaps() {
+  skillGaps(source = 'marketing') {
     const owned = new Set([...this.sim.agents.values()].flatMap((a) => a.skills));
-    return Object.keys(this.skills).filter((k) => !owned.has(k));
+    return Object.keys(this.skills).filter((k) => !owned.has(k) && (this.skills[k].source || 'marketing') === source);
   },
+
+  /** Rank each library on its own (word rarity is judged within a library) and pick the one that fits the need best. */
+  rankLibraries(need) {
+    const sub = (src) => Object.fromEntries(Object.entries(this.skills).filter(([, s]) => (s.source || 'marketing') === src));
+    const min = { marketing: 8, hr: 14 }; // the HR library is much larger and noisier, so a hire from it needs a stronger match
+    const best = { source: 'marketing', ranked: [], fit: 0 };
+    for (const src of ['marketing', 'hr']) {
+      const lib = sub(src); if (!Object.keys(lib).length) continue;
+      const ranked = rankSkills(lib, need, 6, lib).filter((r) => r.score >= min[src]);
+      const fit = ranked.length ? ranked[0].score / min[src] : 0;
+      if (fit > best.fit) { best.source = src; best.ranked = ranked; best.fit = fit; }
+    }
+    return best;
+  },
+
+  skillSyncFor(source) { return (this.skillSyncs || []).find((s) => s.id === source) || null; },
+  skillSourceFor(source, skills) { const ss = this.skillSyncFor(source); return { library: source, repo: ss?.repo || null, commit: ss?.commit ? ss.commit.slice(0, 7) : null, builtFrom: skills }; },
 
   /** Simulated mode: a brief that really matches an unowned playbook gets a specialist built from it. */
   skillGapSpecs(text) {
-    const gaps = Object.fromEntries(this.skillGaps().map((k) => [k, this.skills[k]]));
-    return rankSkills(gaps, text, 2, this.skills).filter((r) => r.score >= 8).map((r) => {
-      const s = this.skills[r.name];
-      return { role: clip(`${s.title} Specialist`, 60), skills: [r.name], gap: true, why: `The "${r.name}" playbook is in the skills library but nobody on the team owns it, and this brief needs it.`, assignment: [r.name, `Apply the ${s.title} playbook to this brief and give the team the guidance they need before they write or plan.`], dept: 'strategy' };
-    });
+    const out = [];
+    for (const [src, min, dept] of [['marketing', 8, 'strategy'], ['hr', 14, 'people']]) {
+      const universe = Object.fromEntries(Object.entries(this.skills).filter(([, s]) => (s.source || 'marketing') === src));
+      const gaps = Object.fromEntries(this.skillGaps(src).map((k) => [k, this.skills[k]]));
+      for (const r of rankSkills(gaps, text, 2, universe).filter((x) => x.score >= min)) {
+        const s = this.skills[r.name];
+        out.push({ role: clip(`${s.title} Specialist`, 60), skills: [r.name], gap: true, why: `The "${r.name}" playbook is in the skills library but nobody on the team owns it, and this brief needs it.`, assignment: [r.name, `Apply the ${s.title} playbook to this brief and give the team the guidance they need before they write or plan.`], dept });
+      }
+      if (out.length) break; // the marketing library wins when it fits; HR playbooks are only for genuinely HR-domain briefs
+    }
+    return out.slice(0, 2);
   },
 
   /** Check the upstream skills repository (throttled) and update the library from it. */
   async refreshSkills(reason) {
-    const ss = this.skillSync; if (!ss || ss.mode === 'off') return null;
-    try { return await ss.check({ reason }); } catch (e) { this.addLog(`Skills update check failed: ${e.message}`, { type: 'system' }); return null; }
+    const syncs = (this.skillSyncs || []).filter((s) => s.mode !== 'off'); if (!syncs.length) return null;
+    const out = await Promise.all(syncs.map((ss) => ss.check({ reason }).catch((e) => { this.addLog(`Skills update check failed (${ss.id}): ${e.message}`, { type: 'system' }); return null; })));
+    return out;
   },
 
+  skillsStatus() { return (this.skillSyncs || []).map((s) => s.status()); },
+
   attachSkillSync(ss) {
-    this.skillSync = ss; if (!ss) return;
+    if (!ss) return; (this.skillSyncs ||= []).push(ss);
     ss.on('updated', (e) => {
       const n = (e.added?.length || 0) + (e.changed?.length || 0);
-      this.addLog(`Skills library ${e.result}: ${e.added?.length ? `${e.added.length} new (${e.added.slice(0, 4).join(', ')}) ` : ''}${e.changed?.length ? `${e.changed.length} updated ` : ''}at ${e.commit}`, { type: 'system' });
+      this.addLog(`${ss.id === 'hr' ? 'HR skills' : 'Skills'} library ${e.result}: ${e.added?.length ? `${e.added.length} new (${e.added.slice(0, 4).join(', ')}) ` : ''}${e.changed?.length ? `${e.changed.length} updated ` : ''}at ${e.commit}`, { type: 'system' });
       if (n || e.result === 'rolled-back') this.toast(e.result === 'rolled-back' ? 'Skills library rolled back' : `Skills library updated: ${e.added?.length || 0} new, ${e.changed?.length || 0} changed`, 'good');
-      this.emit('broadcast', { type: 'skills_updated', skills: this.skillIndexFn?.() || null, source: ss.status() });
+      this.emit('broadcast', { type: 'skills_updated', skills: this.skillIndexFn?.() || null, source: this.skillsStatus() });
+      this.skillsChanged?.(ss, e);
     });
-    ss.on('pending', (st) => { this.toast(`A newer version of the skills library is available (${st.pending.added.length} new, ${st.pending.changed.length} changed). Review it in Settings.`, 'warn'); this.emit('broadcast', { type: 'skills_pending', source: st }); });
+    ss.on('pending', (st) => { this.toast(`A newer version of the skills library is available (${st.pending.added.length} new, ${st.pending.changed.length} changed). Review it in Settings.`, 'warn'); this.emit('broadcast', { type: 'skills_pending', source: this.skillsStatus() }); });
     ss.on('error_', (m) => this.addLog(`Skills update check failed: ${m}`, { type: 'system' }));
   },
 

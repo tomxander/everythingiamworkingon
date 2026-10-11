@@ -230,6 +230,7 @@ export const FLOORS = {
   hub: ['#d2cbb9', '#c6bfad', '#aaa391'],
   lounge: ['#7e6c8c', '#766584', '#5f4f6b'],
   annex: ['#52657d', '#4a5c73', '#3a4a5f'],
+  people: ['#6b8f7a', '#648a73', '#4f7260'],
   door: ['#4a4f5c', '#454a56', '#363a45'],
 };
 

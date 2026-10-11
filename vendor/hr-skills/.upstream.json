@@ -1,0 +1,6 @@
+{
+ "repo": "tuanductran/hr-skills",
+ "branch": "main",
+ "commit": "078f2fb651f1090e73a8cc6ba96f323f8b00b171",
+ "note": "The vendored copy in skills/ was taken from this commit. Newer upstream skills are fetched into data/skills-upstream-hr and layered on top."
+}

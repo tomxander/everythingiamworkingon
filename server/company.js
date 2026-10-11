@@ -34,7 +34,7 @@ export class Company extends EventEmitter {
     this.hiringCaps = { headcount: Number(process.env.HIRE_MAX_HEADCOUNT || 24), total: Number(process.env.HIRE_LIMIT || 12), perTask: Number(process.env.HIRE_PER_TASK || 3) };
     this.hires = new Map(); this.hireRequests = new Map(); this.schedulers = new Map();
     this.webResearch = process.env.WEB_RESEARCH !== 'off';  // simulated mode also does real web searches
-    this.life = null;
+    this.life = null; this.skillSyncs = [];
     this.history = []; // sparkline samples
     this.budgetCap = Number(process.env.BUDGET_CAP_USD || 5);
     this.queue = []; this.active = 0;
@@ -210,7 +210,7 @@ export class Company extends EventEmitter {
   async planTask(task, tok) {
     await this.refreshSkills('planning'); // the planner should see the newest playbooks
     const roster = [...this.sim.agents.values()].filter((a) => a.id !== 'vera' || true);
-    const gaps = this.skillGaps().map((k) => `${k} (${this.skills[k].summary})`);
+    const gaps = this.skillGaps('marketing').map((k) => `${k} (${this.skills[k].summary})`);
     const rosterText = roster.map((a) => `- ${a.id}: ${a.name}, ${a.role}. Skills: ${a.skills.join(', ')}.${a.domains?.length ? ` Domain expertise: ${a.domains.join(', ')}.` : ''}${a.hired ? ' (hired earlier: use them before hiring anyone new)' : ''}`).join('\n');
     const system = [
       `${COMPANY.charter}\n\nYou are Vera Quill, CMO of 4EVR. Your job right now is to turn God's request into a plan of 3 to 7 workstreams, each owned by exactly one teammate and one of THEIR listed skills. Parallelise where possible; use "deps" (0-based indexes of earlier workstreams) only when the work truly needs another's output. Optionally set "consult" to a teammate id who should be asked for a quick opinion first. Do not assign final executive summary work; you will write that yourself.\n\nTeam:\n${rosterText}`,

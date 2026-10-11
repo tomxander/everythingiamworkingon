@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildMap, findPath } from '../server/map.js';
 import { AGENTS } from '../server/roster.js';
-import { loadSkills, bestSkill } from '../server/skills.js';
+import { loadSkills, bestSkill, SKILLS_DIR, HR_SKILLS_DIR } from '../server/skills.js';
 import { planFromPlaybooks } from '../server/mock.js';
 import { extractJson } from '../server/llm.js';
 import { world, run } from './helpers.js';
@@ -16,7 +16,7 @@ test('every desk, seat and spot is reachable from the town hall', () => {
 });
 
 test('roster: unique desks, every skill exists in the library', () => {
-  const skills = loadSkills();
+  const skills = loadSkills([{ dir: SKILLS_DIR, source: 'marketing' }, { dir: HR_SKILLS_DIR, source: 'hr' }]);
   assert.ok(Object.keys(skills).length >= 45, 'skills should be loaded');
   const seen = new Set();
   for (const a of AGENTS) {

@@ -21,7 +21,7 @@ test('before a hire, the upstream repo is checked; a brand-new playbook there be
   assert.ok(w.skills['marine-logistics'], 'the new skill is now in the library'); assert.match(w.skills['seo-audit'].body, /UPSTREAM-UPDATED/, 'changed skills were updated too');
   assert.deepEqual(a.skills, ['marine-logistics']); assert.equal(a.role, 'Marine Logistics Marketing Specialist');
   assert.match(a.persona, /Built from the library's Marine Logistics Marketing playbook/);
-  assert.deepEqual(a.skillSource, { repo: 'o/r', commit: 'aaaaaaa', builtFrom: ['marine-logistics'] }, 'it records which upstream version it was built from');
+  assert.deepEqual(a.skillSource, { library: 'marketing', repo: 'o/r', commit: 'aaaaaaa', builtFrom: ['marine-logistics'] }, 'it records which upstream version it was built from');
   assert.ok(events.includes('skills_updated') && events.includes('agent_added')); assert.deepEqual(c.skillGaps(), [], 'the new skill is now owned');
   assert.ok(c.log.some((l) => /Skills library updated: 1 new/.test(l.text) || /Skills library updated/.test(l.text)));
   // and the specialist really works from that playbook
