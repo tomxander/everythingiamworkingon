@@ -14,6 +14,7 @@ Created by [@tomxander](https://github.com/tomxander), built with Claude Code.
 - [Teamwork](#teamwork)
 - [Internet access](#internet-access)
 - [Hiring](#hiring)
+- [People & Talent](#people--talent)
 - [Learning](#learning)
 - [Execution modes](#execution-modes)
 - [Configuration](#configuration)
@@ -115,6 +116,19 @@ When the work needs a skill, industry knowledge or capacity the team lacks, some
 - **Modes.** `SKILLS_UPDATE=auto` (default) applies updates and tells you, `ask` holds each update for your approval, `off` never contacts GitHub.
 - **Safety.** Skill text becomes part of agent prompts, so a compromised upstream would be a prompt-injection route. Only `api.github.com` and `codeload.github.com` are contacted. The archive is size-capped and read by a hardened parser that accepts only `skills/<name>/SKILL.md` and `references/*.md` (scripts and other files are ignored). Every skill is validated (folder name matches its frontmatter, description present and under 1,024 characters, size limits). A skill removed upstream is kept locally. Use `ask` mode if you want to review what changes before agents use it.
 
+## People & Talent
+
+Two agents run the people function, using the [hr-skills](https://github.com/tuanductran/hr-skills) library (130 playbooks covering workforce planning, recruiting, onboarding, performance management, skills intelligence and more). They sit in their own room below the Annex.
+
+- **Nia Abara, Head of People & Talent** (reports to God, like the CMO) and **Tomás Lindqvist, Talent Intelligence & Skills Analyst**.
+- **Requisitions.** When a hire is approved, Nia writes a job description and a 30/60/90 onboarding plan from the `hr-job-description` and `hr-onboarding` playbooks. Both are stored on the hire, shown in their profile, and Nia greets them on arrival.
+- **Performance reviews.** Each review is built from counted facts: deliverables, first-pass peer-review approval, revisions, consults and lessons saved. The rating is a rule (Exceeds at 90% or more, Meets at 70% or more, otherwise Needs development, and no rating below three reviewed deliverables), not an opinion. In live mode Nia writes the narrative from those facts; in simulated mode it is derived from them. Development areas become lessons the person sees in later prompts. Reviews run automatically for hires after every three reviewed deliverables, or on demand from the Team tab.
+- **Workforce reports.** Every five finished tasks (or on demand) Nia and Tomás publish a report to the Output tab: headcount against the caps, per-person output and approval rate, coverage by team, skills in each library that nobody owns, which library commit is in use, and recommendations. The CMO's planner also receives a one-line workforce snapshot.
+- **Releases need God.** HR can propose letting a hire go (two consecutive Needs-development reviews, or on request). Nothing happens until you approve it in the Team tab. The founding team is never proposed.
+- **What stays in code.** Hiring caps, the rating rule, the numbers in every report, and the approval requirement. HR agents cannot change them.
+- **Adapted, not copied.** The HR playbooks are written for human employees. Nia is instructed to use their structure and leave out payroll, benefits, labour law and similar. People & Talent only take HR, hiring, workforce and employer-branding work; the planner is told so.
+- **Updates.** The HR library is checked and synced like the marketing one (`HR_SKILLS_REPO`, `HR_SKILLS_BRANCH`), with the same safety rules. Tomás posts a note when either library changes. A hire for an HR-domain need is built from the HR library; marketing needs are always built from the marketing library, and HR playbooks need a stronger match before they are used.
+
 ## Learning
 
 Agents get better with use. Knowledge is stored in `data/knowledge.json` and can be inspected, pinned and deleted in the Brain tab.
@@ -160,6 +174,7 @@ Live mode has been verified against a local fake of the Messages API (request fo
 | `MAX_ACTIVE_TASKS` | `3` | Concurrent tasks. |
 | `API_TIMEOUT_MS` | `180000` | Per-request timeout for model calls. |
 | `SKILLS_REPO`, `SKILLS_BRANCH`, `SKILLS_UPDATE` | `coreyhaines31/marketingskills`, `main`, `auto` | Upstream skills repository, branch, and update mode (`auto`, `ask`, `off`). |
+| `HR_SKILLS_REPO`, `HR_SKILLS_BRANCH` | `tuanductran/hr-skills`, `main` | Upstream HR skills repository and branch (update mode is shared with `SKILLS_UPDATE`). |
 | `SKILLS_API_BASE`, `SKILLS_ARCHIVE_BASE` | GitHub | Override the GitHub endpoints (a trusted operator choice; used by tests). |
 | `COLLAB` | `full` | Team conversation: `full`, `lean` or `off`. |
 | `HIRING`, `HIRE_MAX_HEADCOUNT`, `HIRE_LIMIT`, `HIRE_PER_TASK` | `auto`, `24`, `12`, `3` | Hiring mode and caps. |
@@ -169,7 +184,7 @@ Live mode has been verified against a local fake of the Messages API (request fo
 | `PORT`, `HOST` | `4747`, `127.0.0.1` | Server binding. See [Security](#security). |
 | `ALLOW_PRIVATE_FETCH` | unset | Set to `1` only for testing against a local site. Disables the private-address block on page reading. |
 | `DATA_DIR`, `DELIVERABLES_DIR` | `./data`, `./deliverables` | Persistence locations. |
-| `SKILLS_DIR` | `./vendor/marketingskills/skills` | Skill library location. |
+| `SKILLS_DIR`, `HR_SKILLS_DIR` | `./vendor/marketingskills/skills`, `./vendor/hr-skills/skills` | Skill library locations. |
 | `ANTHROPIC_BASE_URL` | Anthropic API | Override for proxies or testing. |
 
 ## Agent roster
@@ -190,6 +205,8 @@ Live mode has been verified against a local fake of the Messages API (request fo
 | Lifecycle & Paid | Camila Reyes, Paid Media | ads, ad-creative, attribution, ab-testing |
 | Revenue & Reach | Harper Cole, RevOps & Sales Enablement | revops, sales-enablement, cold-email, prospecting |
 | Revenue & Reach | Imani Brooks, PR & Partnerships | public-relations, co-marketing, events, influencer-marketing, launch |
+| People & Talent | Nia Abara, Head of People & Talent | hr-workforce-planning, hr-talent-acquisition, hr-onboarding, hr-offboarding, hr-performance-management, hr-job-description, hr-organizational-design, hr-competency-management, hr-employer-branding |
+| People & Talent | Tomás Lindqvist, Talent Intelligence & Skills | hr-skills-intelligence, hr-skills-taxonomy, hr-workforce-forecasting, hr-analytics, hr-talent-mapping, hr-recruitment-marketing, hr-candidate-experience |
 
 ## Architecture
 
@@ -198,6 +215,7 @@ server/
   index.js     HTTP and WebSocket server, scheduling loops, static files
   company.js   Task pipeline, planner, consults, reviews, synthesis, metrics, persistence
   collab.js    Org structure, kickoff, task channel, handoffs, alignment, escalation, agent toolbox
+  hr.js        People & Talent: requisitions, reviews, workforce reports, release proposals
   hiring.js    Hiring policy, building specialists from library skills, onboarding, approval, letting people go
   skillsync.js Keeps the skills library current with its upstream GitHub repo: fetch, validate, overlay, rollback
   learning.js  Reflection, retrospectives, study, consolidation
@@ -211,7 +229,7 @@ server/
   life.js      Idle behaviour between tasks
   map.js       Floor plan, walkability grid, A* pathfinding
 public/        Browser client: canvas renderer and interface (no build step, no image assets)
-vendor/        marketingskills (MIT)
+vendor/        marketingskills and hr-skills (MIT)
 tests/         node:test suites
 ```
 
@@ -238,9 +256,10 @@ The server is authoritative. It streams state to the browser over WebSocket at 1
 npm test
 ```
 
-Ninety-one tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (including private-address and redirect protection and untrusted-content fencing), site crawling, the org chart, kickoff, handoffs, alignment, escalation and recovery, hiring policy and approval, the knowledge base (safety filter, retrieval, promotion and retirement, consolidation, learning about learning), the learning loop, reuse of hired specialists, upstream skill sync (hardened archive reading, validation, overlay, rollback, approval) and hiring from newly added playbooks, work-aware chat, lean versus full conversation cost, and the live path against scripted fakes of the Messages API: tool use, asking teammates, hiring mid-task, saving lessons, reflection, retrospectives, study, prompt-injection resistance, truncation recovery, revisions and timeouts.
+One hundred and one tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (including private-address and redirect protection and untrusted-content fencing), site crawling, the org chart, kickoff, handoffs, alignment, escalation and recovery, hiring policy and approval, the knowledge base (safety filter, retrieval, promotion and retirement, consolidation, learning about learning), the learning loop, reuse of hired specialists, upstream skill sync (hardened archive reading, validation, overlay, rollback, approval) and hiring from newly added playbooks, People & Talent (requisitions, rating rule, reports, releases needing approval), the real hr-skills archive, work-aware chat, lean versus full conversation cost, and the live path against scripted fakes of the Messages API: tool use, asking teammates, hiring mid-task, saving lessons, reflection, retrospectives, study, prompt-injection resistance, truncation recovery, revisions and timeouts.
 
 ## Licence and credits
 
 - Created by [@tomxander](https://github.com/tomxander), built with Claude Code.
 - Marketing skills by [Corey Haines](https://github.com/coreyhaines31/marketingskills), used under the MIT licence. See `vendor/marketingskills/LICENSE`.
+- HR skills by [Tuan Duc Tran](https://github.com/tuanductran/hr-skills), used under the MIT licence. See `vendor/hr-skills/LICENSE`.

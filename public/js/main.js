@@ -10,7 +10,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const st = {
   init: null, agents: {}, order: [], tasks: new Map(), deliv: new Map(), comms: [], log: [], stats: null, settings: null,
   snap: null, live: {}, selected: null, tab: 'tasks', openTasks: new Set(), commsFilter: 'all', commsTask: 'all', unreadOutput: 0, fxSeen: new Set(),
-  kb: null, hiring: null, brainFilter: 'all', brainQuery: '', pendingHires: [],
+  kb: null, hiring: null, hr: null, brainFilter: 'all', brainQuery: '', pendingHires: [],
 };
 let ws, renderer, reconnectDelay = 500;
 
@@ -39,6 +39,7 @@ function handle(m) {
     case 'kb': st.kb = m.kb; if (st.tab === 'brain') renderBrain(); updateBadges(); break;
     case 'agent_added': { const a = m.agent; st.agents[a.id] = a; if (!st.order.includes(a.id)) st.order.push(a.id); renderer?.addAgent(a); st.hiring = m.hiring; if (st.tab === 'team') renderTeam(); break; }
     case 'agent_removed': { delete st.agents[m.id]; st.order = st.order.filter((x) => x !== m.id); delete st.live[m.id]; renderer?.removeAgent(m.id); st.hiring = m.hiring; if (st.selected === m.id) st.selected = null; if (st.tab === 'team') renderTeam(); break; }
+    case 'hr': st.hr = m.hr; if (st.tab === 'team') renderTeam(); break;
     case 'hire_request': st.pendingHires.push(m.req); if (st.tab === 'team') renderTeam(); break;
     case 'hire_resolved': st.pendingHires = st.pendingHires.filter((x) => x.id !== m.id); if (st.tab === 'team') renderTeam(); break;
     case 'deliverable_full': openDeliverable(m.deliverable); break;
@@ -51,7 +52,7 @@ function handle(m) {
 function onInit(m) {
   st.init = m; st.agents = Object.fromEntries(m.agents.map((a) => [a.id, a])); st.order = m.agents.map((a) => a.id);
   st.tasks = new Map(m.tasks.map((t) => [t.id, t])); st.deliv = new Map(m.deliverables.map((d) => [d.id, d]));
-  st.comms = m.comms; st.log = m.log; st.stats = m.stats; st.settings = m.settings; st.snap = m.snapshot; st.kb = m.kb; st.hiring = m.hiring; st.pendingHires = m.hiring?.pending || [];
+  st.comms = m.comms; st.log = m.log; st.stats = m.stats; st.settings = m.settings; st.snap = m.snapshot; st.kb = m.kb; st.hiring = m.hiring; st.hr = m.hr; st.pendingHires = m.hiring?.pending || [];
   for (const a of m.snapshot.agents) st.live[a.id] = a;
   $('#tagline').textContent = `· ${m.company.tagline}`;
   if (!renderer) {
@@ -289,6 +290,16 @@ function appendComms(m) {
 }
 
 // ------------------------------------------------------------ team panel
+function hrPanel() {
+  const h = st.hr; if (!h) return '';
+  const rel = (h.releases || []).filter((r) => r.status === 'pending').map((r) => `<div class="card hirereq"><b>Nia proposes releasing ${esc(r.name)}</b><div class="muted">${esc(r.reason)}</div><div class="row" style="margin-top:6px"><button class="btn primary sm" data-rd="${r.id}" data-ok="1">Approve release</button><button class="btn sm" data-rd="${r.id}" data-ok="0">Keep</button></div></div>`).join('');
+  const rep = (h.reports || [])[0]; const revs = (h.reviews || []).slice(0, 4);
+  return `${rel}<details class="card"><summary><b>People &amp; Talent</b> <span class="muted">· ${h.facts.headcount}/${h.facts.caps.headcount} desks · ${h.facts.hiredNow}/${h.facts.caps.total} hires used · ${h.facts.unowned.marketing} marketing and ${h.facts.unowned.hr} HR library skills unowned</span></summary>
+    <div class="row" style="margin:6px 0"><button class="btn sm" id="hr-report">Workforce report</button><button class="btn sm" id="hr-reviews">Review everyone</button></div>
+    ${rep ? `<div class="muted" style="font-size:12px">Latest report: ${esc(new Date(rep.at).toLocaleString())} · ${esc(rep.recommendations[0] || '')}</div>` : '<div class="muted" style="font-size:12px">No workforce report yet. One is written every five finished tasks.</div>'}
+    ${revs.map((r) => `<div style="margin-top:6px;font-size:12px"><b>${esc(r.name)}</b> <span class="pill">${esc(r.rating)}</span><div class="muted">${esc(r.narrative)}</div></div>`).join('')}
+    ${(h.skillNotes || []).slice(0, 2).map((n) => `<div class="muted" style="font-size:11.5px;margin-top:4px">${esc(n.text)}</div>`).join('')}</details>`;
+}
 function renderTeam() {
   const p = $('#p-team'); const byDept = {};
   for (const id of st.order) (byDept[st.agents[id].dept] ||= []).push(id);
@@ -296,8 +307,8 @@ function renderTeam() {
   const pend = (st.pendingHires || []).map((r) => `<div class="card hirereq"><b>${esc(st.agents[r.by]?.short || r.by)} wants to hire a ${esc(r.role)}</b><div class="muted">${esc(r.why)}</div><div class="muted">Skills: ${esc((r.skills || []).join(', '))}</div><div class="row" style="margin-top:6px"><button class="btn primary sm" data-hd="${r.id}" data-ok="1">Approve</button><button class="btn sm" data-hd="${r.id}" data-ok="0">Decline</button></div></div>`).join('');
   const kids = (id) => st.order.filter((x) => st.agents[x].reportsTo === id);
   const node = (id, depth = 0) => `<div class="org" style="margin-left:${depth * 14}px" data-sel="${id}">${avatar(id)}<b>${esc(st.agents[id].short)}</b><span class="muted">${esc(st.agents[id].role)}</span>${st.agents[id].hired ? '<em class="tagnew">hired</em>' : ''}</div>${kids(id).map((k) => node(k, depth + 1)).join('')}`;
-  p.innerHTML = `${pend}<div class="card"><div class="row" style="justify-content:space-between"><div><b>${h ? h.headcount : st.order.length} people</b> <span class="muted">· ${h ? h.hired : 0} hired · ${h ? h.freeDesks : 0} free desks in the Annex · hiring: ${esc(st.settings?.hiring || 'auto')}</span></div><button class="btn sm" id="t-hire">+ Hire someone</button></div>
-    <details class="orgchart"><summary>Org chart</summary>${st.agents.vera ? node('vera') : ''}</details></div>`
+  p.innerHTML = `${pend}${hrPanel()}<div class="card"><div class="row" style="justify-content:space-between"><div><b>${h ? h.headcount : st.order.length} people</b> <span class="muted">· ${h ? h.hired : 0} hired · ${h ? h.freeDesks : 0} free desks in the Annex · hiring: ${esc(st.settings?.hiring || 'auto')}</span></div><button class="btn sm" id="t-hire">+ Hire someone</button></div>
+    <details class="orgchart"><summary>Org chart</summary>${st.order.filter((id) => !st.agents[id].reportsTo).map((id) => node(id)).join('')}</details></div>`
     + Object.entries(byDept).map(([d, ids]) => `<div class="dept-title" style="color:${st.init.depts[d].color}"><i style="background:${st.init.depts[d].color}"></i>${esc(st.init.depts[d].label)}</div>` + ids.map((id) => {
       const a = st.agents[id]; const rep = a.reportsTo ? st.agents[a.reportsTo]?.short : null;
       return `<div class="person" data-id="${id}"><canvas width="48" height="72" data-av="${id}"></canvas><div><div class="nm">${esc(a.name)} ${a.lead ? '<em class="taglead">lead</em>' : ''}${a.hired ? '<em class="tagnew">hired</em>' : ''}</div><div class="rl">${esc(a.role)}${rep ? ` · reports to ${esc(rep)}` : ''}</div><div class="st" data-st="${id}"></div>
@@ -307,6 +318,8 @@ function renderTeam() {
   $$('.person', p).forEach((c) => (c.onclick = () => { selectAgent(c.dataset.id, { focus: true, open: true }); }));
   $$('[data-sel]', p).forEach((c) => (c.onclick = () => selectAgent(c.dataset.sel, { focus: true })));
   $$('[data-hd]', p).forEach((b) => (b.onclick = () => send({ type: 'hireDecision', id: b.dataset.hd, ok: b.dataset.ok === '1' })));
+  $$('[data-rd]', p).forEach((b) => (b.onclick = () => send({ type: 'releaseDecision', id: b.dataset.rd, ok: b.dataset.ok === '1' })));
+  const hrr = $('#hr-report', p); if (hrr) hrr.onclick = () => send({ type: 'hrReport' }); const hrv = $('#hr-reviews', p); if (hrv) hrv.onclick = () => send({ type: 'hrReviewAll' });
   $('#t-hire', p).onclick = () => openHireForm();
   updateTeam();
 }
@@ -375,7 +388,7 @@ function renderOutput() {
   const p = $('#p-output');
   const list = [...st.deliv.values()].sort((a, b) => b.created - a.created);
   if (!list.length) { p.innerHTML = `<div class="empty"><div class="big">📄</div>Deliverables from the team will appear here, each saved as Markdown in <code>deliverables/</code>.</div>`; return; }
-  p.innerHTML = list.map((d) => `<div class="card deliv" data-id="${d.id}"><div class="tagrow">${avatar(d.agent)}<span class="pill ${d.kind === 'summary' || d.kind === 'profile' ? 'sum' : ''}">${d.kind === 'summary' ? 'executive summary' : d.kind === 'profile' ? 'client profile' : esc(d.skill)}</span><span class="pill">${d.taskId}</span>${d.simulated ? '<span class="pill sim">simulated</span>' : ''}<span>${d.words} words</span></div><div class="t">${esc(d.title)}</div><div class="pv">${esc(d.preview)}</div></div>`).join('');
+  p.innerHTML = list.map((d) => `<div class="card deliv" data-id="${d.id}"><div class="tagrow">${avatar(d.agent)}<span class="pill ${d.kind === 'summary' || d.kind === 'profile' || d.kind === 'hr' ? 'sum' : ''}">${d.kind === 'summary' ? 'executive summary' : d.kind === 'profile' ? 'client profile' : d.kind === 'hr' ? 'workforce report' : esc(d.skill)}</span><span class="pill">${d.taskId}</span>${d.simulated ? '<span class="pill sim">simulated</span>' : ''}<span>${d.words} words</span></div><div class="t">${esc(d.title)}</div><div class="pv">${esc(d.preview)}</div></div>`).join('');
   $$('.deliv', p).forEach((c) => (c.onclick = () => send({ type: 'deliverable', id: c.dataset.id })));
 }
 
@@ -451,6 +464,8 @@ function openInspector(id) {
     <div class="row"><button class="btn" id="i-follow">Follow</button><button class="btn" id="i-bless">✨ Bless</button><button class="btn" id="i-smite">⚡ Smite (lightly)</button><button class="btn primary" id="i-task">Assign task</button>${a.hired ? '<button class="btn" id="i-fire">Let go</button>' : ''}</div></div></div>
     <h3 class="sect" style="margin-top:18px">Skills</h3><div class="chips">${a.skills.map((k) => `<span class="skill" data-skill="${k}">${k}</span>`).join('')}</div>
     <h3 class="sect">Talk to ${esc(a.short)}</h3><form class="row" id="i-chat"><input class="field" style="flex:1" id="i-chat-text" placeholder="Say something to ${esc(a.short)}…" maxlength="500"/><button class="btn">Send</button></form><div id="i-reply" class="muted" style="margin-top:6px"></div>
+    ${a.jd ? `<h3 class="sect">Job description</h3><div class="md">${md(a.jd)}</div><h3 class="sect">30/60/90 plan</h3>${(a.onboarding || []).map((p) => `<div class="srcline"><b>${esc(p.phase)}</b>: ${esc(p.goals.join('; '))}</div>`).join('')}` : ''}
+    ${(st.hr?.reviews || []).filter((r) => r.agent === a.id).slice(0, 2).map((r) => `<h3 class="sect">Performance review <span class="pill">${esc(r.rating)}</span></h3><div class="muted">${esc(r.narrative)}</div><div class="muted" style="font-size:11px">${esc(r.factLines.join(' · '))}</div>`).join('')}
     <h3 class="sect">What ${esc(a.short)} has learned</h3><div id="insp-les"></div><h3 class="sect">Memory</h3><div id="insp-mem"></div>`, 'agent');
   const fire = $('#i-fire'); if (fire) fire.onclick = () => { if (confirm(`Let ${a.name} go? What they learned stays with the team.`)) { send({ type: 'fire', id }); closeModal(); } };
   const c = $('#insp-av').getContext('2d'); c.imageSmoothingEnabled = false; c.drawImage(personFrame(a.id, a.look, 'down', 'stand', 0), 0, 0, 48, 72);
@@ -493,21 +508,27 @@ function openSettings() {
   $('#s-save').onclick = () => { const key = $('#s-key').value.trim(); if (!key && !s.hasKey) return; send({ type: 'setKey', key: key || undefined, useLive: true }); if (!key) send({ type: 'setMode', mode: 'live' }); };
   $('#s-model-save').onclick = () => send({ type: 'setModel', model: $('#s-model').value });
   $('#s-budget-save').onclick = () => send({ type: 'setBudget', value: $('#s-budget').value });
-  $$('[data-skmode]', card).forEach((b) => (b.onclick = () => send({ type: 'setSkillsMode', value: b.dataset.skmode }))); const skc = $('#sk-check'); if (skc) skc.onclick = () => { skc.textContent = 'Checking…'; send({ type: 'skillsCheck' }); }; const skr = $('#sk-rollback'); if (skr) skr.onclick = () => { if (confirm('Roll the skills library back to the previous version?')) send({ type: 'skillsRollback' }); }; const ska = $('#sk-approve'); if (ska) ska.onclick = () => send({ type: 'skillsApprove' }); const skd = $('#sk-decline'); if (skd) skd.onclick = () => send({ type: 'skillsDecline' });
+  $$('[data-skmode]', card).forEach((b) => (b.onclick = () => send({ type: 'setSkillsMode', value: b.dataset.skmode }))); $$('[data-sk-check]', card).forEach((b) => (b.onclick = () => { b.textContent = 'Checking…'; send({ type: 'skillsCheck', id: b.dataset.skCheck }); })); $$('[data-sk-rollback]', card).forEach((b) => (b.onclick = () => { if (confirm('Roll this skills library back to the previous version?')) send({ type: 'skillsRollback', id: b.dataset.skRollback }); })); $$('[data-sk-approve]', card).forEach((b) => (b.onclick = () => send({ type: 'skillsApprove', id: b.dataset.skApprove }))); $$('[data-sk-decline]', card).forEach((b) => (b.onclick = () => send({ type: 'skillsDecline', id: b.dataset.skDecline })));
   $$('[data-collab]', card).forEach((b) => (b.onclick = () => send({ type: 'setCollab', value: b.dataset.collab }))); $$('[data-hiring]', card).forEach((b) => (b.onclick = () => send({ type: 'setHiring', value: b.dataset.hiring }))); $$('[data-learning]', card).forEach((b) => (b.onclick = () => send({ type: 'setLearning', value: b.dataset.learning })));
   $('#s-mock').onclick = () => send({ type: 'setMode', mode: 'mock' }); $('#s-live').onclick = () => send({ type: 'setMode', mode: 'live' });
 }
 
 function skillsBlock(s) {
-  const k = s.skills; if (!k) return '';
+  const libs = [].concat(s.skills || []); if (!libs.length) return '';
   const when = (t) => (t ? new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'never');
-  const pend = k.pending;
-  return `<label class="field-label">Skills library <span class="muted">· specialists are built from it</span></label>
-    <div class="notice">Source: <b>${esc(k.repo)}</b> (${esc(k.branch)}). Using commit <code>${esc(k.commit || 'unknown')}</code>${k.vendoredCommit && k.commit !== k.vendoredCommit ? ` (shipped with <code>${esc(k.vendoredCommit)}</code>)` : ''} · ${k.skillCount} skills · last synced ${esc(when(k.syncedAt))} · last checked ${esc(when(k.checkedAt))}.
-      ${k.lastError ? `<div style="color:#ffb4a0;margin-top:4px">Last check failed: ${esc(k.lastError)}</div>` : ''}
-      <div class="muted" style="margin-top:4px">The library is checked before every hire and every few hours. Updates are stored separately from the project files and can be rolled back. Skill text becomes part of agent prompts, so use <b>ask</b> if you want to approve each update.</div></div>
-    ${pend ? `<div class="notice warn"><b>Update available</b> (<code>${esc(pend.commit)}</code>): ${pend.added.length} new${pend.added.length ? ` (${esc(pend.added.slice(0, 6).join(', '))})` : ''}, ${pend.changed.length} changed${pend.changed.length ? ` (${esc(pend.changed.slice(0, 6).join(', '))})` : ''}. <div class="row" style="margin-top:6px"><button class="btn primary sm" id="sk-approve">Approve</button><button class="btn sm" id="sk-decline">Decline</button></div></div>` : ''}
-    <div class="row">${['auto', 'ask', 'off'].map((m) => `<button class="btn ${k.mode === m ? 'primary' : ''}" data-skmode="${m}">${m}</button>`).join('')}<button class="btn" id="sk-check">Check for updates now</button><button class="btn" id="sk-rollback" ${k.canRollback ? '' : 'disabled'}>Roll back last update</button></div>`;
+  const name = { marketing: 'Marketing skills', hr: 'HR skills' };
+  const one = (k) => {
+    const pend = k.pending;
+    return `<div class="notice" style="margin-top:6px"><b>${esc(name[k.id] || k.id)}</b> · ${esc(k.repo)} (${esc(k.branch)}). Commit <code>${esc(k.commit || 'unknown')}</code>${k.vendoredCommit && k.commit !== k.vendoredCommit ? ` (shipped with <code>${esc(k.vendoredCommit)}</code>)` : ''} · ${k.skillCount} skills · synced ${esc(when(k.syncedAt))} · checked ${esc(when(k.checkedAt))}.
+      ${k.lastError ? `<div style="color:#ffb4a0;margin-top:4px">Last check failed: ${esc(k.lastError)}</div>` : ''}</div>
+    ${pend ? `<div class="notice warn"><b>${esc(name[k.id] || k.id)} update available</b> (<code>${esc(pend.commit)}</code>): ${pend.added.length} new${pend.added.length ? ` (${esc(pend.added.slice(0, 6).join(', '))})` : ''}, ${pend.changed.length} changed${pend.changed.length ? ` (${esc(pend.changed.slice(0, 6).join(', '))})` : ''}. <div class="row" style="margin-top:6px"><button class="btn primary sm" data-sk-approve="${esc(k.id)}">Approve</button><button class="btn sm" data-sk-decline="${esc(k.id)}">Decline</button></div></div>` : ''}
+    <div class="row" style="margin-top:4px"><button class="btn sm" data-sk-check="${esc(k.id)}">Check ${esc(k.id)} now</button><button class="btn sm" data-sk-rollback="${esc(k.id)}" ${k.canRollback ? '' : 'disabled'}>Roll back ${esc(k.id)}</button></div>`;
+  };
+  const mode = libs[0].mode;
+  return `<label class="field-label">Skills libraries <span class="muted">· specialists are built from them</span></label>
+    <div class="row">${['auto', 'ask', 'off'].map((m) => `<button class="btn ${mode === m ? 'primary' : ''}" data-skmode="${m}">${m}</button>`).join('')}</div>
+    <div class="muted" style="font-size:11.5px;margin:4px 0">Each library is checked before every hire and every few hours. Updates are stored apart from the project files and can be rolled back. Skill text becomes part of agent prompts, so use <b>ask</b> to approve each update.</div>
+    ${libs.map(one).join('')}`;
 }
 
 // ------------------------------------------------------------ God console

@@ -15,4 +15,7 @@ export const TEMPLATES = [
   { name: 'Full 90-day plan', title: 'Complete 90-day marketing plan for Pulse', brief: `${CLIENT} Goal: 3x paying users in 90 days with a $40k budget. Want positioning, offer, channel mix, content, CRO and measurement in one plan.` },
   { name: 'Competitor deep-dive', title: 'Competitive teardown: Habitica, Streaks and Fabulous', brief: `${CLIENT} Profile each competitor's positioning, pricing, proof, weaknesses, and the gap Pulse should own.`, assignee: 'sol' },
   { name: 'Quick: rewrite hero copy', title: 'Rewrite the Pulse hero section', brief: `${CLIENT} Give three headline directions with subheads and CTAs.`, assignee: 'theo' },
+  { name: 'HR: team performance review', title: 'Review how the 4EVR team is performing and where it is stretched', brief: 'Use the real record of finished work: first-pass approval, revisions, consults and lessons. Rate fairly, say what to coach, and say whether any role should change.', assignee: 'nia' },
+  { name: 'HR: headcount plan', title: 'Plan 4EVR headcount for the next quarter', brief: 'Which capabilities will the work in the pipeline need, who owns them today, where are we thin, and which hires (if any) are justified. Use the skills library to name roles.', assignee: 'nia' },
+  { name: 'HR: employer brand for a client', title: 'Employer-branding plan for [client]', brief: 'Who the client wants to hire, what they offer, what candidates see today, and a plan to attract them.', assignee: 'nia' },
 ];

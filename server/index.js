@@ -97,7 +97,7 @@ function initPayload() {
     map: { TILE, W: map.W, H: map.H, rooms: map.rooms, floor: map.floor, wall: map.wall, furniture: map.furniture, spots: map.spots },
     agents: [...sim.agents.values()].map((a) => company.publicAgent(a)),
     kb: { summary: company.kb.summary(), lessons: company.kb.view(250), playbooks: company.kb.playbooks, notes: company.kb.notes.slice(0, 30), events: company.kb.events.slice(-20) },
-    hiring: company.hiringStatus(),
+    hiring: company.hiringStatus(), hr: company.hrPublic(),
     depts: DEPT_META,
     skills: skillIndex(skills), skillsSource: company.skillsStatus(),
     tasks: [...company.tasks.values()].map((t) => company.publicTask(t)),
@@ -132,6 +132,10 @@ wss.on('connection', (ws) => {
         case 'hire': company.godHire({ role: m.role, skills: m.skills, why: m.why, domain: m.domain, need: m.need }).catch((e) => send(ws, { type: 'toast', text: `Could not hire: ${e.message}`, level: 'warn' })); break;
         case 'fire': await company.fire(m.id); break;
         case 'hireDecision': company.decideHire(m.id, !!m.ok); break;
+        case 'hrReview': company.performanceReview(String(m.id)).catch((e) => send(ws, { type: 'toast', text: e.message, level: 'warn' })); break;
+        case 'hrReviewAll': company.reviewAll().catch((e) => send(ws, { type: 'toast', text: e.message, level: 'warn' })); break;
+        case 'hrReport': company.workforceReport({ reason: 'requested by God' }).catch((e) => send(ws, { type: 'toast', text: e.message, level: 'warn' })); break;
+        case 'releaseDecision': company.decideRelease(String(m.id), !!m.ok).catch((e) => send(ws, { type: 'toast', text: e.message, level: 'warn' })); break;
         case 'kbForget': company.kb.remove(m.id); break;
         case 'kbPin': company.kb.pin(m.id, m.value !== false); break;
         case 'skillsCheck': Promise.all(skillSyncs.filter((s) => !m.id || s.id === m.id).map((s) => s.check({ force: true, reason: 'manual' }))).then((rs) => { broadcast({ type: 'settings', settings: settings() }); const err = rs.find((r) => r.result === 'error'); send(ws, { type: 'toast', text: err ? `Could not check for updates: ${err.error}` : rs.every((r) => r.result === 'up-to-date') ? 'The skills libraries are up to date.' : `Skills: ${rs.map((r) => r.result).join(', ')}`, level: err ? 'warn' : 'info' }); }); break;

@@ -12,7 +12,7 @@ const ANNEX_SLOTS = 16;
 
 export const hiring = {
   publicAgent(a) {
-    return { id: a.id, short: a.short, name: a.name, role: a.role, dept: a.dept, room: a.room, color: a.color, emoji: a.emoji, skills: a.skills, persona: a.persona, quirks: a.quirks, look: a.look, lead: !!a.lead, reportsTo: a.reportsTo || null, hired: !!a.hired, domains: a.domains || [], joined: a.joined || null, why: a.why || null };
+    return { id: a.id, short: a.short, name: a.name, role: a.role, dept: a.dept, room: a.room, color: a.color, emoji: a.emoji, skills: a.skills, persona: a.persona, quirks: a.quirks, look: a.look, lead: !!a.lead, reportsTo: a.reportsTo || null, hired: !!a.hired, domains: a.domains || [], joined: a.joined || null, why: a.why || null, jd: a.jd || null, onboarding: a.onboarding || null };
   },
 
   hiringStatus() {
@@ -70,12 +70,13 @@ export const hiring = {
 
     const dept = spec.dept && DEPT_META[spec.dept] ? spec.dept : source === 'hr' ? 'people' : this.deptForSkills(skills);
     const lead = this.agent(TEAM_LEADS[dept]) || this.agent('vera');
+    const req = await this.hrRequisition(task, { role, skills, why: spec.why, dept, lead, gap, domain: spec.domain });
     const profile = await this.makeProfile(task, { role, skills, why: spec.why, domain: spec.domain, dept, lead, gap });
     const seq = ++this.seq.hire; const first = profile.first;
     const def = {
       id: `h${seq}-${first.toLowerCase().replace(/[^a-z]/g, '').slice(0, 10) || 'new'}`, short: first, name: `${first} ${profile.last}`, role, dept, room: 'annex', slot, color: DEPT_META[dept].color, emoji: 'badge',
       skills, persona: profile.persona, quirks: profile.quirks, look: randomLook(`${role}${seq}`, DEPT_META[dept].color), lead: false, reportsTo: lead.id, hired: true,
-      domains: spec.domain ? [String(spec.domain).toLowerCase().slice(0, 24)] : [], skillSource: this.skillSourceFor(source, skills), hiredFor: task?.id || null, why: clip(String(spec.why || ''), 240), joined: Date.now(), by: requesterId,
+      domains: spec.domain ? [String(spec.domain).toLowerCase().slice(0, 24)] : [], skillSource: this.skillSourceFor(source, skills), jd: req.jd, onboarding: req.plan, hiredFor: task?.id || null, why: clip(String(spec.why || ''), 240), joined: Date.now(), by: requesterId,
     };
     const agent = this.sim.addAgent(def, { spawn: this.sim.map.spots.annexdoor });
     this.hires.set(def.id, def);
@@ -180,7 +181,7 @@ export const hiring = {
   },
 
   async onboard(agent, task, lead) {
-    const sim = this.sim; const vera = this.agent('vera');
+    const sim = this.sim; const vera = this.agent('nia') || this.agent('vera'); // People & Talent greets new hires
     await this.withAgent(agent, async (tok) => {
       sim.setStatus(agent, 'First day');
       await sim.goTo(agent, sim.map.spots.welcome, { tok });
@@ -188,6 +189,7 @@ export const hiring = {
       sim.emoteFor(agent, 'heart', 3); agent.mood = Math.min(100, agent.mood + 15);
       await this.sleepSim(3.5, tok);
       await sim.goTo(agent, agent.desk.seat, { pose: 'sit', tok });
+      this.onboardingNote(agent);
       agent.memory.push({ t: Math.round(sim.time), text: `Joined 4EVR as ${agent.role}. ${agent.why ? `Why: ${clip(agent.why, 100)}` : ''}`.trim() });
       agent.pose = 'type';
     });

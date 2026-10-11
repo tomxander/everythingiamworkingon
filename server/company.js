@@ -12,6 +12,7 @@ import { Knowledge } from './knowledge.js';
 import { collab } from './collab.js';
 import { hiring } from './hiring.js';
 import { learning } from './learning.js';
+import { hr } from './hr.js';
 
 const MAX_ACTIVE_TASKS = Number(process.env.MAX_ACTIVE_TASKS || 3);
 const CLIENT_TTL = 6 * 3600 * 1000; // re-read a client's site after 6 hours
@@ -204,6 +205,7 @@ export class Company extends EventEmitter {
     await this.finale(task, doneSubs);
     // 5. Retrospective: what worked, what did not, what changes. This is where the company learns.
     await this.retro(task, doneSubs).catch((e) => this.addLog(`Retro skipped (${e.message})`, { type: 'system', taskId: task.id }));
+    await this.hrAfterTask().catch((e) => this.addLog(`People review skipped (${e.message})`, { type: 'system' }));
     this.save();
   }
 
@@ -211,7 +213,7 @@ export class Company extends EventEmitter {
     await this.refreshSkills('planning'); // the planner should see the newest playbooks
     const roster = [...this.sim.agents.values()].filter((a) => a.id !== 'vera' || true);
     const gaps = this.skillGaps('marketing').map((k) => `${k} (${this.skills[k].summary})`);
-    const rosterText = roster.map((a) => `- ${a.id}: ${a.name}, ${a.role}. Skills: ${a.skills.join(', ')}.${a.domains?.length ? ` Domain expertise: ${a.domains.join(', ')}.` : ''}${a.hired ? ' (hired earlier: use them before hiring anyone new)' : ''}`).join('\n');
+    const rosterText = roster.map((a) => `- ${a.id}: ${a.name}, ${a.role}. Skills: ${a.skills.join(', ')}.${a.domains?.length ? ` Domain expertise: ${a.domains.join(', ')}.` : ''}${a.hired ? ' (hired earlier: use them before hiring anyone new)' : ''}${a.dept === 'people' ? ' (People & Talent: assign only HR, hiring, workforce or employer-branding work)' : ''}`).join('\n') + `\n\n${this.hrSnapshotText()}`;
     const system = [
       `${COMPANY.charter}\n\nYou are Vera Quill, CMO of 4EVR. Your job right now is to turn God's request into a plan of 3 to 7 workstreams, each owned by exactly one teammate and one of THEIR listed skills. Parallelise where possible; use "deps" (0-based indexes of earlier workstreams) only when the work truly needs another's output. Optionally set "consult" to a teammate id who should be asked for a quick opinion first. Do not assign final executive summary work; you will write that yourself.\n\nTeam:\n${rosterText}`,
     ];
@@ -649,7 +651,7 @@ export class Company extends EventEmitter {
       const data = {
         v: 1, savedAt: Date.now(), seq: this.seq, completed: this.completed, simTime: this.sim.time, skillUse: this.skillUse, history: this.history,
         tasks: [...this.tasks.values()], deliverables: [...this.deliverables.values()], comms: this.comms.slice(-300), log: this.log.slice(-400), agents,
-        llmTotals: this.llm.totals, budgetCap: this.budgetCap, clients: [...this.clients.values()], hires: [...this.hires.values()], settings: { collab: this.collab, hiringMode: this.hiringMode },
+        llmTotals: this.llm.totals, budgetCap: this.budgetCap, clients: [...this.clients.values()], hires: [...this.hires.values()], settings: { collab: this.collab, hiringMode: this.hiringMode }, hr: this.hrSave(),
       };
       const tmp = path.join(this.dataDir, 'state.json.tmp');
       fs.writeFileSync(tmp, JSON.stringify(data)); fs.renameSync(tmp, path.join(this.dataDir, 'state.json'));
@@ -666,7 +668,7 @@ export class Company extends EventEmitter {
       for (const h of d.hires || []) { if (!this.sim.agents.has(h.id) && this.sim.map.desks[h.room]?.[h.slot]) { this.sim.addAgent(h); this.hires.set(h.id, h); } }
       if (d.settings?.collab && !process.env.COLLAB) this.collab = d.settings.collab;
       if (d.settings?.hiringMode && !process.env.HIRING) this.hiringMode = d.settings.hiringMode;
-      this.kb.load();
+      this.kb.load(); this.hrLoad(d.hr);
       for (const t of d.tasks || []) {
         if (['planning', 'active', 'review', 'queued'].includes(t.status)) { t.status = 'interrupted'; t.error = 'Server restarted while this was running. Use Retry.'; t.subtasks.forEach((s) => { if (s.status === 'working' || s.status === 'ready') s.status = 'waiting'; }); }
         this.tasks.set(t.id, t);
@@ -694,4 +696,4 @@ function headlineOf(md) {
   return clip((md.replace(/^#.*$/gm, '').replace(/[*`_>#]/g, '').replace(/\s+/g, ' ').trim()), 140);
 }
 
-Object.assign(Company.prototype, collab, hiring, learning);
+Object.assign(Company.prototype, collab, hiring, learning, hr);

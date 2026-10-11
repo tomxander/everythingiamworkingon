@@ -262,6 +262,7 @@ export function mockComplete(kind, ctx) {
       return { text: JSON.stringify({ lessons: out }), latencyMs: 700 };
     }
     case 'retro': return { text: JSON.stringify(ctx.retro || { wentWell: [], wentWrong: [], lessons: [], rules: [] }), latencyMs: 2500 };
+    case 'hr': return { text: ctx.fallback, latencyMs: 1200 };
     case 'hire': return { text: JSON.stringify(ctx.profile), latencyMs: 1500 };
     case 'consolidate': return { text: (ctx.lessons || []).map((l) => `- ${l}`).join('\n'), latencyMs: 1200 };
     case 'study': return { text: JSON.stringify({ lessons: [] }), latencyMs: 500 };

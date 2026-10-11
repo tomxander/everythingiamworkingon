@@ -143,3 +143,18 @@ test('rollback restores the previous skills, including removing ones the update 
   latest = 'c'.repeat(40); await sync.check({ force: true }); latest = 'a'.repeat(40);
   const two = sync.rollback(); assert.ok(two.result === 'rolled-back');
 });
+
+test('the real hr-skills repo parses cleanly and matches the vendored copy; libraries load side by side', () => {
+  const real = '/home/user/tuanductran/hr-skills';
+  if (fs.existsSync(path.join(real, '.git'))) {
+    const tgz = execFileSync('git', ['-C', real, 'archive', '--format=tar.gz', '--prefix=hr-skills-x/', 'HEAD'], { maxBuffer: 1e8 });
+    const { skills, rejected } = extractSkills(tgz);
+    assert.ok(Object.keys(skills).length >= 100, `real repo yields ${Object.keys(skills).length} skills`); assert.equal(rejected.length, 0, JSON.stringify(rejected.slice(0, 3)));
+    const local = loadSkills(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'vendor', 'hr-skills', 'skills'));
+    for (const k of ['hr-onboarding', 'hr-performance-management', 'hr-job-description']) assert.equal(skills[k].hash, local[k].hash, `${k} identical to the vendored copy`);
+  }
+  const root = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'vendor');
+  const both = loadSkills([{ dir: path.join(root, 'marketingskills', 'skills'), source: 'marketing' }, { dir: path.join(root, 'hr-skills', 'skills'), source: 'hr' }]);
+  assert.equal(both.copywriting.source, 'marketing'); assert.equal(both['hr-onboarding'].source, 'hr');
+  assert.ok(both['hr-onboarding'].references.every((r) => /^(references|content|examples|prompts)\//.test(r)));
+});

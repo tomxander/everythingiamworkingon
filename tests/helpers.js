@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { buildMap } from '../server/map.js';
 import { AGENTS } from '../server/roster.js';
-import { loadSkills } from '../server/skills.js';
+import { loadSkills, SKILLS_DIR, HR_SKILLS_DIR } from '../server/skills.js';
 import { Sim } from '../server/sim.js';
 import { Life } from '../server/life.js';
 import { LLM } from '../server/llm.js';
@@ -12,7 +12,7 @@ import { Company } from '../server/company.js';
 export function world({ life = false, learning = 'passive', web = false, collab = 'full', hiring = 'auto', syncFor = null } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '4evr-'));
   const map = buildMap();
-  const skills = loadSkills();
+  const skills = loadSkills([{ dir: SKILLS_DIR, source: 'marketing' }, { dir: HR_SKILLS_DIR, source: 'hr' }]);
   const sync = syncFor ? syncFor(skills, tmp) : null;
   const llm = new LLM(); llm.apiKey = ''; llm.mode = 'mock';
   const sim = new Sim(map, AGENTS);
