@@ -2,7 +2,7 @@
 // work needs expertise or capacity nobody has. Guardrails: a headcount cap, a per-task cap, a duplicate
 // check, an optional approval step for God, and a visible log. New hires get a desk in the Annex.
 import { COMPANY, DEPT_META, TEAM_LEADS } from './roster.js';
-import { bestSkill } from './skills.js';
+import { bestSkill, rankSkills } from './skills.js';
 import { extractJson } from './llm.js';
 import { HIRE_ROLES, hireRulesFor, randomLook, pickName } from './mock.js';
 
@@ -30,6 +30,7 @@ export const hiring = {
 
   /** Why this person is needed: returns null when a hire is justified, otherwise a reason it is not. */
   hireObjection(spec, skills) {
+    if (this.skillGaps().some((g) => skills.includes(g))) return null; // the library has a playbook nobody on the team owns: a genuine capability gap
     const covering = [...this.sim.agents.values()].filter((x) => skills.every((k) => x.skills.includes(k)));
     if (spec.domain && !this.existingDomains().includes(String(spec.domain).toLowerCase())) return null; // new domain knowledge is a legitimate reason
     if (spec.capacity) return null;
@@ -41,10 +42,21 @@ export const hiring = {
 
   async hire(task, spec, requesterId = 'vera') {
     if (this.hiringMode === 'off') throw new Error('Hiring is switched off.');
-    const role = clip(String(spec.role || '').replace(/[<>`]/g, '').trim(), 60);
+    // Before anyone is hired, look for newer playbooks upstream: a specialist is built from the newest library.
+    await this.refreshSkills('hire');
+    let skills = uniq((spec.skills || []).map(String).filter((s) => this.skills[s])).slice(0, 6);
+    if (!skills.length) { // the need was described, not named: find the playbook(s) in the library that fit it
+      const need = `${spec.role || ''} ${spec.need || ''} ${spec.why || ''} ${typeof spec.assignment === 'string' ? spec.assignment : ''}`;
+      const ranked = rankSkills(this.skills, need, 6).filter((r) => r.score >= 8);
+      const gapSet = new Set(this.skillGaps());
+      const gaps = ranked.filter((r) => gapSet.has(r.name)); // if the library has a playbook the team lacks, the specialist is built from exactly that
+      const pool = gaps.length ? gaps : ranked;
+      skills = pool.filter((r) => r.score >= pool[0].score * 0.6).slice(0, 3).map((r) => r.name);
+    }
+    if (!skills.length) throw new Error('No playbook in the skills library matches this need, so there is nothing to build a specialist from. The library is checked against its upstream repository before every hire.');
+    const gap = skills.filter((k) => this.skillGaps().includes(k));
+    const role = clip(String(spec.role || (gap.length ? `${this.skills[gap[0]].title} Specialist` : '')).replace(/[<>`]/g, '').trim(), 60);
     if (role.length < 4) throw new Error('A hire needs a clear job title.');
-    const skills = uniq((spec.skills || []).map(String).filter((s) => this.skills[s])).slice(0, 6);
-    if (!skills.length) throw new Error('Pick at least one skill from the library for this person to own.');
     const hiredCount = [...this.sim.agents.values()].filter((a) => a.hired).length;
     if (this.sim.agents.size >= this.hiringCaps.headcount) throw new Error(`Headcount is at the cap of ${this.hiringCaps.headcount}.`);
     if (hiredCount >= this.hiringCaps.total) throw new Error(`The hiring limit of ${this.hiringCaps.total} people has been reached.`);
@@ -57,12 +69,12 @@ export const hiring = {
 
     const dept = spec.dept && DEPT_META[spec.dept] ? spec.dept : this.deptForSkills(skills);
     const lead = this.agent(TEAM_LEADS[dept]) || this.agent('vera');
-    const profile = await this.makeProfile(task, { role, skills, why: spec.why, domain: spec.domain, dept, lead });
+    const profile = await this.makeProfile(task, { role, skills, why: spec.why, domain: spec.domain, dept, lead, gap });
     const seq = ++this.seq.hire; const first = profile.first;
     const def = {
       id: `h${seq}-${first.toLowerCase().replace(/[^a-z]/g, '').slice(0, 10) || 'new'}`, short: first, name: `${first} ${profile.last}`, role, dept, room: 'annex', slot, color: DEPT_META[dept].color, emoji: 'badge',
       skills, persona: profile.persona, quirks: profile.quirks, look: randomLook(`${role}${seq}`, DEPT_META[dept].color), lead: false, reportsTo: lead.id, hired: true,
-      domains: spec.domain ? [String(spec.domain).toLowerCase().slice(0, 24)] : [], hiredFor: task?.id || null, why: clip(String(spec.why || ''), 240), joined: Date.now(), by: requesterId,
+      domains: spec.domain ? [String(spec.domain).toLowerCase().slice(0, 24)] : [], skillSource: this.skillSync ? { repo: this.skillSync.repo, commit: this.skillSync.commit ? this.skillSync.commit.slice(0, 7) : null, builtFrom: skills } : { builtFrom: skills }, hiredFor: task?.id || null, why: clip(String(spec.why || ''), 240), joined: Date.now(), by: requesterId,
     };
     const agent = this.sim.addAgent(def, { spawn: this.sim.map.spots.annexdoor });
     this.hires.set(def.id, def);
@@ -76,23 +88,57 @@ export const hiring = {
     return agent;
   },
 
+  /** Library skills that no current teammate owns. These are the capabilities the team cannot deliver today. */
+  skillGaps() {
+    const owned = new Set([...this.sim.agents.values()].flatMap((a) => a.skills));
+    return Object.keys(this.skills).filter((k) => !owned.has(k));
+  },
+
+  /** Simulated mode: a brief that really matches an unowned playbook gets a specialist built from it. */
+  skillGapSpecs(text) {
+    const gaps = Object.fromEntries(this.skillGaps().map((k) => [k, this.skills[k]]));
+    return rankSkills(gaps, text, 2, this.skills).filter((r) => r.score >= 8).map((r) => {
+      const s = this.skills[r.name];
+      return { role: clip(`${s.title} Specialist`, 60), skills: [r.name], gap: true, why: `The "${r.name}" playbook is in the skills library but nobody on the team owns it, and this brief needs it.`, assignment: [r.name, `Apply the ${s.title} playbook to this brief and give the team the guidance they need before they write or plan.`], dept: 'strategy' };
+    });
+  },
+
+  /** Check the upstream skills repository (throttled) and update the library from it. */
+  async refreshSkills(reason) {
+    const ss = this.skillSync; if (!ss || ss.mode === 'off') return null;
+    try { return await ss.check({ reason }); } catch (e) { this.addLog(`Skills update check failed: ${e.message}`, { type: 'system' }); return null; }
+  },
+
+  attachSkillSync(ss) {
+    this.skillSync = ss; if (!ss) return;
+    ss.on('updated', (e) => {
+      const n = (e.added?.length || 0) + (e.changed?.length || 0);
+      this.addLog(`Skills library ${e.result}: ${e.added?.length ? `${e.added.length} new (${e.added.slice(0, 4).join(', ')}) ` : ''}${e.changed?.length ? `${e.changed.length} updated ` : ''}at ${e.commit}`, { type: 'system' });
+      if (n || e.result === 'rolled-back') this.toast(e.result === 'rolled-back' ? 'Skills library rolled back' : `Skills library updated: ${e.added?.length || 0} new, ${e.changed?.length || 0} changed`, 'good');
+      this.emit('broadcast', { type: 'skills_updated', skills: this.skillIndexFn?.() || null, source: ss.status() });
+    });
+    ss.on('pending', (st) => { this.toast(`A newer version of the skills library is available (${st.pending.added.length} new, ${st.pending.changed.length} changed). Review it in Settings.`, 'warn'); this.emit('broadcast', { type: 'skills_pending', source: st }); });
+    ss.on('error_', (m) => this.addLog(`Skills update check failed: ${m}`, { type: 'system' }));
+  },
+
   deptForSkills(skills) {
     const tally = {};
     for (const a of this.sim.agents.values()) for (const k of skills) if (a.skills.includes(k) && !a.hired) tally[a.dept] = (tally[a.dept] || 0) + 1;
     return Object.entries(tally).sort((x, y) => y[1] - x[1])[0]?.[0] || 'strategy';
   },
 
-  async makeProfile(task, { role, skills, why, domain, dept, lead }) {
+  async makeProfile(task, { role, skills, why, domain, dept, lead, gap = [] }) {
     const seed = `${role}|${domain || ''}|${this.seq.hire}`;
     const taken = new Set([...this.sim.agents.values()].map((a) => a.short.toLowerCase()));
     const nm = pickName(seed, taken);
     const tpl = HIRE_ROLES.find((r) => r.domain === domain || r.role.toLowerCase() === role.toLowerCase());
-    const fallback = { first: nm.first, last: nm.last, persona: tpl?.persona || `${role}. Brings deep specialist knowledge${domain ? ` of ${domain}` : ''} and works closely with ${lead.short}. Prefers evidence to opinion and writes things down.`, quirks: tpl?.quirks || ['What does the evidence say?', 'Let me check that first.', 'Write it down so the next person can use it.'] };
+    const fromLib = skills.map((k) => this.skills[k]?.title || k).join(', ');
+    const fallback = { first: nm.first, last: nm.last, persona: tpl?.persona || (gap.length ? `Built from the library's ${fromLib} playbook${skills.length > 1 ? 's' : ''}. Works strictly from that guidance, says so when a request falls outside it, and flags gaps instead of guessing.` : `${role}. Brings deep specialist knowledge${domain ? ` of ${domain}` : ''} and works closely with ${lead.short}. Prefers evidence to opinion and writes things down.`), quirks: tpl?.quirks || ['What does the evidence say?', 'Let me check that first.', 'Write it down so the next person can use it.'] };
     try {
       const res = await this.llm.complete({
         kind: 'hire', maxTokens: 400, ...this.toolkit(this.agent('vera'), task, { light: true }),
         system: this.personaSystem(this.agent('vera'), 'You are finalising a hire. Create a credible colleague profile.'),
-        user: `New role: ${role}\nSkills they will own: ${skills.join(', ')}\nWhy we need them: ${why}\nDomain: ${domain || 'general'}\nTeam: ${DEPT_META[dept].label}, reporting to ${lead.name}\nFirst names already taken: ${[...taken].join(', ')}\n\nReply with JSON only: {"first":"first name","last":"last name","persona":"2 sentences: how they work and what they care about","quirks":["three short things they often say"]}`,
+        user: `New role: ${role}\nSkills they will own (from the skills library${gap.length ? `; the library has these playbooks but nobody on the team owned them: ${gap.join(', ')}` : ''}): ${skills.join(', ')}\nWhy we need them: ${why}\nDomain: ${domain || 'general'}\nTeam: ${DEPT_META[dept].label}, reporting to ${lead.name}\nFirst names already taken: ${[...taken].join(', ')}\n\nReply with JSON only: {"first":"first name","last":"last name","persona":"2 sentences: how they work and what they care about","quirks":["three short things they often say"]}`,
         ctx: { profile: fallback, title: role },
       });
       this.account(task || { tokens: 0, cost: 0 }, res);
@@ -129,9 +175,9 @@ export const hiring = {
 
   async toolHire(a, task, input) {
     try {
-      const skills = (Array.isArray(input.skills) ? input.skills : []).filter((s) => this.skills[s]);
-      const agent = await this.hire(task, { role: input.role, skills, why: input.why, domain: input.domain }, a.id);
-      const skill = skills.includes(agent.skills[0]) ? agent.skills[0] : bestSkill(this.skills, agent.skills, `${input.assignment} ${input.role}`);
+      const agent = await this.hire(task, { role: input.role, skills: Array.isArray(input.skills) ? input.skills : [], need: input.need, why: input.why, domain: input.domain, assignment: input.assignment }, a.id);
+      const named = (Array.isArray(input.skills) ? input.skills : []).some((k) => this.skills[k]);
+      const skill = named ? bestSkill(this.skills, agent.skills, `${input.assignment} ${input.role}`) : agent.skills[0]; // a described need maps to its best-matching playbook
       const sub = this.addDynamicSubtask(task, agent.id, skill, input.assignment, a.id);
       return `Hired ${agent.name} (${agent.role}). Their workstream ${sub.id} is queued: "${clip(String(input.assignment || ''), 140)}". Their output goes into the final summary. Do not wait for it: state what you expect from them and carry on with your own deliverable.`;
     } catch (e) { return `Could not hire: ${e.message}`; }
@@ -140,6 +186,7 @@ export const hiring = {
   /** Planning-time hires. Live: the CMO's plan lists them. Simulated: rules read the brief and the site. */
   async applyHires(task, plan, rawHires) {
     if (this.hiringMode === 'off') return this.dropHireSteps(plan);
+    await this.refreshSkills('planning');
     const mock = this.llm.mode === 'mock';
     const siteText = (task.sources || []).flatMap((s) => s.pages.map((p) => p.title)).join(' ');
     let specs;
@@ -154,6 +201,8 @@ export const hiring = {
         this.insertLeadingStep(plan, known.id, this.skills[r.step[0]] ? r.step[0] : known.skills[0], r.step[1]);
         this.talk(task, { from: 'vera', to: 'all', kind: 'hire', text: `${known.short} already knows the ${r.domain} domain from earlier work, so I am putting them on this instead of hiring.` });
       }
+      // library playbooks that nobody on the team owns (for example new upstream skills) and that this brief needs
+      for (const g of this.skillGapSpecs(text)) if (specs.length < 2) specs.push(g);
     }
     else specs = (Array.isArray(rawHires) ? rawHires : []).slice(0, this.hiringCaps.perTask).map((h) => ({ role: h.role, skills: h.skills, domain: h.domain, why: h.why, assignment: h.assignment }));
     const made = [];
@@ -214,9 +263,9 @@ export const hiring = {
   },
 
   /** God hires someone directly, outside any task. */
-  async godHire({ role, skills, why, domain }) {
+  async godHire({ role, skills, why, domain, need }) {
     const list = (Array.isArray(skills) ? skills : String(skills || '').split(/[,\s]+/)).map((s) => s.trim()).filter(Boolean);
-    const agent = await this.hire(null, { role, skills: list, why: why || 'Hired by God.', domain: domain || null, capacity: true }, 'god');
+    const agent = await this.hire(null, { role, skills: list, need, why: why || 'Hired by God.', domain: domain || null, capacity: true }, 'god');
     return agent;
   },
 

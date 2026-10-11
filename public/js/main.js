@@ -32,8 +32,10 @@ function handle(m) {
     case 'task': st.tasks.set(m.task.id, m.task); renderTasksSoon(); updateBadges(); break;
     case 'deliverable': st.deliv.set(m.deliverable.id, m.deliverable); if (st.tab !== 'output') st.unreadOutput++; renderOutputSoon(); updateBadges(); break;
     case 'stats': st.stats = m.stats; st.settings = m.settings; updateTop(); if (st.tab === 'metrics') renderMetrics(); break;
-    case 'settings': st.settings = m.settings; updateTop(); if (!$('#modal').hidden && $('#modal-card').dataset.kind === 'settings') openSettings(); break;
+    case 'settings': st.settings = m.settings; updateTop(); refreshSettings(); break;
     case 'toast': toast(m.text, m.level); break;
+    case 'skills_updated': if (m.skills) st.init.skills = m.skills; if (m.source && st.settings) st.settings.skills = m.source; if (st.tab === 'brain') renderBrain(); if (st.tab === 'metrics') renderMetrics(); refreshSettings(); break;
+    case 'skills_pending': if (m.source && st.settings) st.settings.skills = m.source; refreshSettings(); break;
     case 'kb': st.kb = m.kb; if (st.tab === 'brain') renderBrain(); updateBadges(); break;
     case 'agent_added': { const a = m.agent; st.agents[a.id] = a; if (!st.order.includes(a.id)) st.order.push(a.id); renderer?.addAgent(a); st.hiring = m.hiring; if (st.tab === 'team') renderTeam(); break; }
     case 'agent_removed': { delete st.agents[m.id]; st.order = st.order.filter((x) => x !== m.id); delete st.live[m.id]; renderer?.removeAgent(m.id); st.hiring = m.hiring; if (st.selected === m.id) st.selected = null; if (st.tab === 'team') renderTeam(); break; }
@@ -357,12 +359,13 @@ function renderBrain() {
 function openHireForm() {
   const skills = st.init.skills.map((k) => k.name);
   openModal(`<button class="btn close">✕</button><h2>Hire someone</h2><div class="muted">They get a desk in the Annex and join the team. The CMO and the leads can also hire when a task needs it (hiring mode: ${esc(st.settings?.hiring || 'auto')}).</div>
-    <form id="hire-form"><label class="field-label">Job title</label><input class="field" id="h-role" maxlength="60" placeholder="e.g. Marine Industry Strategist" required />
-    <label class="field-label">Skills they will own (comma separated)</label><input class="field" id="h-skills" list="h-skill-list" placeholder="customer-research, competitors" required /><datalist id="h-skill-list">${skills.map((k) => `<option value="${k}">`).join('')}</datalist>
+    <form id="hire-form"><label class="field-label">Job title</label><input class="field" id="h-role" maxlength="60" placeholder="e.g. Marine Industry Strategist (optional when a library playbook is matched)" />
+    <label class="field-label">Describe what is needed <span class="muted">(the matching playbooks are found in the skills library, which is checked for updates first)</span></label><textarea class="field" id="h-need" rows="2" maxlength="300" placeholder="e.g. marketing for shipping and marine logistics companies"></textarea>
+    <label class="field-label">…or name the skills (comma separated, optional)</label><input class="field" id="h-skills" list="h-skill-list" placeholder="customer-research, competitors" /><datalist id="h-skill-list">${skills.map((k) => `<option value="${k}">`).join('')}</datalist>
     <label class="field-label">Domain (optional, one word)</label><input class="field" id="h-domain" maxlength="24" placeholder="marine" />
     <label class="field-label">Why</label><textarea class="field" id="h-why" rows="2" maxlength="240" placeholder="What the team is missing"></textarea>
     <div class="row" style="margin-top:14px"><button class="btn primary">Hire</button></div></form>`, 'hire');
-  $('#hire-form').onsubmit = (e) => { e.preventDefault(); send({ type: 'hire', role: $('#h-role').value.trim(), skills: $('#h-skills').value.split(/[,\s]+/).filter(Boolean), why: $('#h-why').value.trim(), domain: $('#h-domain').value.trim() || null }); closeModal(); };
+  $('#hire-form').onsubmit = (e) => { e.preventDefault(); const role = $('#h-role').value.trim(), need = $('#h-need').value.trim(), skills = $('#h-skills').value.split(/[,\s]+/).filter(Boolean); if (!skills.length && !need) { toast('Describe the need or name at least one skill.', 'warn'); return; } send({ type: 'hire', role, need, skills, why: $('#h-why').value.trim(), domain: $('#h-domain').value.trim() || null }); closeModal(); };
 }
 
 // ------------------------------------------------------------ output panel
@@ -470,6 +473,8 @@ function updateInspector() {
   else if (rep && last && rep.textContent.endsWith('thinking…') && last.wall > (rep._t || 0)) { rep.innerHTML = `<b style="color:${a.color}">${esc(a.short)}:</b> ${esc(last.text)}`; }
 }
 
+function refreshSettings() { if (!$('#modal').hidden && $('#modal-card').dataset.kind === 'settings') openSettings(); }
+
 function openSettings() {
   const s = st.settings; if (!s) return;
   openModal(`<button class="btn close">✕</button><h2>Settings</h2><div class="muted">How the agents think.</div>
@@ -481,14 +486,28 @@ function openSettings() {
     <label class="field-label">Team conversation (cost vs. realism)</label><div class="row">${['full', 'lean', 'off'].map((m) => `<button class="btn ${s.collab === m ? 'primary' : ''}" data-collab="${m}">${m}</button>`).join('')}</div><div class="muted" style="font-size:11.5px;margin-top:4px">full: kickoff, handoffs, consults, alignment meetings. lean: fewer calls. off: agents just work. Each conversation turn is a small model call in live mode.</div>
     <label class="field-label">Hiring</label><div class="row">${['auto', 'ask', 'off'].map((m) => `<button class="btn ${s.hiring === m ? 'primary' : ''}" data-hiring="${m}">${m}</button>`).join('')}</div><div class="muted" style="font-size:11.5px;margin-top:4px">auto: the CMO and agents hire within the caps. ask: you approve each hire. off: no hiring.</div>
     <label class="field-label">Learning</label><div class="row">${['active', 'passive', 'off'].map((m) => `<button class="btn ${s.learning === m ? 'primary' : ''}" data-learning="${m}">${m}</button>`).join('')}</div><div class="muted" style="font-size:11.5px;margin-top:4px">active: also studies the web in idle time. passive: reviews and retrospectives only. off: nothing recorded.</div>
+    ${skillsBlock(s)}
     <label class="field-label">Mode</label><div class="row"><button class="btn ${s.mode === 'mock' ? 'primary' : ''}" id="s-mock">Simulated</button><button class="btn ${s.mode === 'live' ? 'primary' : ''}" id="s-live" ${s.hasKey ? '' : 'disabled'}>Live</button></div>
     ${s.lastError ? `<div class="notice warn">Last API error: ${esc(s.lastError)}</div>` : ''}
     <div class="notice" style="margin-top:16px">Prices used for cost estimates: $${s.price.in}/M input, $${s.price.out}/M output tokens (override with the <code>PRICE_IN</code> / <code>PRICE_OUT</code> env vars). Your key is never written to disk; you can also set <code>ANTHROPIC_API_KEY</code> before starting the server.</div>`, 'settings');
   $('#s-save').onclick = () => { const key = $('#s-key').value.trim(); if (!key && !s.hasKey) return; send({ type: 'setKey', key: key || undefined, useLive: true }); if (!key) send({ type: 'setMode', mode: 'live' }); };
   $('#s-model-save').onclick = () => send({ type: 'setModel', model: $('#s-model').value });
   $('#s-budget-save').onclick = () => send({ type: 'setBudget', value: $('#s-budget').value });
+  $$('[data-skmode]', card).forEach((b) => (b.onclick = () => send({ type: 'setSkillsMode', value: b.dataset.skmode }))); const skc = $('#sk-check'); if (skc) skc.onclick = () => { skc.textContent = 'Checking…'; send({ type: 'skillsCheck' }); }; const skr = $('#sk-rollback'); if (skr) skr.onclick = () => { if (confirm('Roll the skills library back to the previous version?')) send({ type: 'skillsRollback' }); }; const ska = $('#sk-approve'); if (ska) ska.onclick = () => send({ type: 'skillsApprove' }); const skd = $('#sk-decline'); if (skd) skd.onclick = () => send({ type: 'skillsDecline' });
   $$('[data-collab]', card).forEach((b) => (b.onclick = () => send({ type: 'setCollab', value: b.dataset.collab }))); $$('[data-hiring]', card).forEach((b) => (b.onclick = () => send({ type: 'setHiring', value: b.dataset.hiring }))); $$('[data-learning]', card).forEach((b) => (b.onclick = () => send({ type: 'setLearning', value: b.dataset.learning })));
   $('#s-mock').onclick = () => send({ type: 'setMode', mode: 'mock' }); $('#s-live').onclick = () => send({ type: 'setMode', mode: 'live' });
+}
+
+function skillsBlock(s) {
+  const k = s.skills; if (!k) return '';
+  const when = (t) => (t ? new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'never');
+  const pend = k.pending;
+  return `<label class="field-label">Skills library <span class="muted">· specialists are built from it</span></label>
+    <div class="notice">Source: <b>${esc(k.repo)}</b> (${esc(k.branch)}). Using commit <code>${esc(k.commit || 'unknown')}</code>${k.vendoredCommit && k.commit !== k.vendoredCommit ? ` (shipped with <code>${esc(k.vendoredCommit)}</code>)` : ''} · ${k.skillCount} skills · last synced ${esc(when(k.syncedAt))} · last checked ${esc(when(k.checkedAt))}.
+      ${k.lastError ? `<div style="color:#ffb4a0;margin-top:4px">Last check failed: ${esc(k.lastError)}</div>` : ''}
+      <div class="muted" style="margin-top:4px">The library is checked before every hire and every few hours. Updates are stored separately from the project files and can be rolled back. Skill text becomes part of agent prompts, so use <b>ask</b> if you want to approve each update.</div></div>
+    ${pend ? `<div class="notice warn"><b>Update available</b> (<code>${esc(pend.commit)}</code>): ${pend.added.length} new${pend.added.length ? ` (${esc(pend.added.slice(0, 6).join(', '))})` : ''}, ${pend.changed.length} changed${pend.changed.length ? ` (${esc(pend.changed.slice(0, 6).join(', '))})` : ''}. <div class="row" style="margin-top:6px"><button class="btn primary sm" id="sk-approve">Approve</button><button class="btn sm" id="sk-decline">Decline</button></div></div>` : ''}
+    <div class="row">${['auto', 'ask', 'off'].map((m) => `<button class="btn ${k.mode === m ? 'primary' : ''}" data-skmode="${m}">${m}</button>`).join('')}<button class="btn" id="sk-check">Check for updates now</button><button class="btn" id="sk-rollback" ${k.canRollback ? '' : 'disabled'}>Roll back last update</button></div>`;
 }
 
 // ------------------------------------------------------------ God console

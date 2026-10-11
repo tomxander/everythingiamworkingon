@@ -54,7 +54,8 @@ export function normalizeUrl(input) {
   } catch { return null; }
 }
 
-function rawGet(urlStr, redirectsLeft = 4) {
+export function rawGet(urlStr, redirectsLeft = 4, opts = {}) {
+  const limit = opts.maxBytes ?? MAX_BYTES;
   return new Promise((resolve, reject) => {
     let u;
     try { u = new URL(urlStr); } catch { return reject(new Error('Invalid URL')); }
@@ -63,21 +64,21 @@ function rawGet(urlStr, redirectsLeft = 4) {
     const lib = u.protocol === 'https:' ? https : http;
     const req = lib.request(u, {
       method: 'GET', lookup: guardedLookup, timeout: TIMEOUT_MS,
-      headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.5', 'accept-encoding': 'gzip, deflate, br', 'accept-language': 'en' },
+      headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.5', 'accept-encoding': opts.binary ? 'identity' : 'gzip, deflate, br', 'accept-language': 'en', ...(opts.headers || {}) },
     }, (res) => {
       const status = res.statusCode || 0;
       if (status >= 300 && status < 400 && res.headers.location) {
         res.resume();
         if (redirectsLeft <= 0) return reject(new Error('Too many redirects'));
         let next; try { next = new URL(res.headers.location, u).toString(); } catch { return reject(new Error('Bad redirect')); }
-        return resolve(rawGet(next, redirectsLeft - 1));
+        return resolve(rawGet(next, redirectsLeft - 1, opts));
       }
       let stream = res;
       const enc = String(res.headers['content-encoding'] || '').toLowerCase();
       if (enc === 'gzip') stream = res.pipe(zlib.createGunzip()); else if (enc === 'deflate') stream = res.pipe(zlib.createInflate()); else if (enc === 'br') stream = res.pipe(zlib.createBrotliDecompress());
       const chunks = []; let size = 0; let done = false;
-      const finish = (err) => { if (done) return; done = true; if (err) reject(err); else resolve({ status, finalUrl: u.toString(), type: String(res.headers['content-type'] || ''), body: Buffer.concat(chunks).toString('utf8') }); };
-      stream.on('data', (c) => { size += c.length; if (size > MAX_BYTES) { chunks.push(c.subarray(0, Math.max(0, c.length - (size - MAX_BYTES)))); req.destroy(); finish(); } else chunks.push(c); });
+      const finish = (err) => { if (done) return; done = true; if (err) reject(err); else resolve({ status, finalUrl: u.toString(), type: String(res.headers['content-type'] || ''), body: opts.binary ? Buffer.concat(chunks) : Buffer.concat(chunks).toString('utf8'), truncated: size > limit }); };
+      stream.on('data', (c) => { size += c.length; if (size > limit) { chunks.push(c.subarray(0, Math.max(0, c.length - (size - limit)))); req.destroy(); finish(); } else chunks.push(c); });
       stream.on('end', () => finish()); stream.on('error', (e) => finish(e)); res.on('error', (e) => finish(e));
       req.on('close', () => finish());
     });

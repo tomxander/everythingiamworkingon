@@ -2,7 +2,7 @@
 
 A multi-agent marketing operations platform. A team of specialist AI agents, organised into teams with leads and coordinated by a CMO agent, plans, executes, reviews and reports on marketing work. Agents have internet access, can hire the right specialists when the work needs them, and learn from every review and retrospective. A live operations view shows who is doing what, what they are saying to each other, what they have learned, and what it costs.
 
-Agent expertise comes from the open-source [marketingskills](https://github.com/coreyhaines31/marketingskills) library (50 skills, MIT), vendored in `vendor/marketingskills`. Each agent loads the full playbooks for the skills it owns into its system prompt.
+Agent expertise comes from the open-source [marketingskills](https://github.com/coreyhaines31/marketingskills) library (50 skills, MIT), vendored in `vendor/marketingskills` and kept current from the upstream repository. Each agent loads the full playbooks for the skills it owns into its system prompt, and every new specialist is built from playbooks in that library.
 
 Created by [@tomxander](https://github.com/tomxander), built with Claude Code.
 
@@ -98,12 +98,22 @@ Every agent has two tools in live mode: `web_search` and `fetch_url`, on every k
 When the work needs a skill, industry knowledge or capacity the team lacks, someone can be hired.
 
 - **Who can hire.** The CMO at planning time (a plan can include `hires`), and any agent mid-task through the `request_hire` tool. A mid-task hire gets a new workstream added to the running task. You can also hire directly from the Team tab.
+- **Built from the skills library.** A hire is always built from playbooks in the marketingskills library, never invented. Before every hire (and at planning time) the library is checked against its upstream GitHub repository and updated if there is a newer commit, so a specialist is built from the newest playbooks. A need can be named (`skills`) or just described (`need`): the matching playbooks are found by ranking the library with rarity-weighted word matching. If the library has a playbook that nobody on the team owns (for example a new upstream skill), that is a genuine capability gap and the specialist is built from exactly that playbook. If no playbook matches, the hire is refused rather than faked. Each hire records which upstream commit it was built from.
 - **Guardrails.** A hire is refused when an existing teammate already covers the skills and has capacity, unless it is a new domain or the others are swamped. Caps: headcount (`HIRE_MAX_HEADCOUNT`, default 24), total hires (`HIRE_LIMIT`, default 12), hires per task (`HIRE_PER_TASK`, default 3), and 16 desks in the Annex. Skills must exist in the library.
 - **Approval.** `HIRING=auto` (default), `ask` (you approve or decline each hire in the Team tab; no answer in ten minutes is a decline) or `off`.
 - **Onboarding.** A new hire gets a name, persona and look, a desk in the Annex, a place in the org chart under the relevant team lead, a welcome from the CMO and lead, and a memory of why they were hired. They are included in the kickoff and inherit the team's lessons.
 - **Letting go.** You can let a hired person go when they are idle. Their good lessons move to their team and weak ones are retired. Hires and their stats persist across restarts.
 - **Reuse.** A specialist hired for a domain is used on later briefs in that domain instead of hiring again, so their experience accumulates. The CMO's planner is told who was hired earlier and what they know.
 - Hiring adds model cost only when the new person has work to do. In simulated mode, hires are triggered by rules that read the brief and the site (for example automotive, e-commerce, video, events, localization, account-based marketing).
+
+
+### Keeping the skills library current
+
+- **Source.** `SKILLS_REPO` (default `coreyhaines31/marketingskills`) on `SKILLS_BRANCH` (default `main`). The vendored copy records the commit it came from in `vendor/marketingskills/.upstream.json`.
+- **When it checks.** Before every hire, when a task is planned, shortly after start, and every six hours. Checks are throttled to once every ten minutes. A check that fails (offline, rate-limited) is logged and never blocks hiring: the team carries on with the library it has.
+- **Where updates go.** Into `data/skills-upstream/`, layered over the vendored copy. Your tracked files are never modified. The previous version is kept so an update can be rolled back from Settings.
+- **Modes.** `SKILLS_UPDATE=auto` (default) applies updates and tells you, `ask` holds each update for your approval, `off` never contacts GitHub.
+- **Safety.** Skill text becomes part of agent prompts, so a compromised upstream would be a prompt-injection route. Only `api.github.com` and `codeload.github.com` are contacted. The archive is size-capped and read by a hardened parser that accepts only `skills/<name>/SKILL.md` and `references/*.md` (scripts and other files are ignored). Every skill is validated (folder name matches its frontmatter, description present and under 1,024 characters, size limits). A skill removed upstream is kept locally. Use `ask` mode if you want to review what changes before agents use it.
 
 ## Learning
 
@@ -149,6 +159,8 @@ Live mode has been verified against a local fake of the Messages API (request fo
 | `BUDGET_CAP_USD` | `5` | Estimated spend at which live mode reverts to simulation. |
 | `MAX_ACTIVE_TASKS` | `3` | Concurrent tasks. |
 | `API_TIMEOUT_MS` | `180000` | Per-request timeout for model calls. |
+| `SKILLS_REPO`, `SKILLS_BRANCH`, `SKILLS_UPDATE` | `coreyhaines31/marketingskills`, `main`, `auto` | Upstream skills repository, branch, and update mode (`auto`, `ask`, `off`). |
+| `SKILLS_API_BASE`, `SKILLS_ARCHIVE_BASE` | GitHub | Override the GitHub endpoints (a trusted operator choice; used by tests). |
 | `COLLAB` | `full` | Team conversation: `full`, `lean` or `off`. |
 | `HIRING`, `HIRE_MAX_HEADCOUNT`, `HIRE_LIMIT`, `HIRE_PER_TASK` | `auto`, `24`, `12`, `3` | Hiring mode and caps. |
 | `LEARNING`, `STUDY_PER_DAY`, `CONSOLIDATE_AT` | `active`, `8`, `5` | Learning mode, study sessions per simulated day, lessons needed to form a playbook. |
@@ -186,7 +198,8 @@ server/
   index.js     HTTP and WebSocket server, scheduling loops, static files
   company.js   Task pipeline, planner, consults, reviews, synthesis, metrics, persistence
   collab.js    Org structure, kickoff, task channel, handoffs, alignment, escalation, agent toolbox
-  hiring.js    Hiring policy, onboarding, approval, letting people go
+  hiring.js    Hiring policy, building specialists from library skills, onboarding, approval, letting people go
+  skillsync.js Keeps the skills library current with its upstream GitHub repo: fetch, validate, overlay, rollback
   learning.js  Reflection, retrospectives, study, consolidation
   knowledge.js Lesson store: scoring, retrieval, promotion and retirement, playbooks, safety filter
   llm.js       Messages API client: tool-use loop, timeouts, retries, truncation recovery, usage accounting
@@ -225,7 +238,7 @@ The server is authoritative. It streams state to the browser over WebSocket at 1
 npm test
 ```
 
-Seventy-five tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (including private-address and redirect protection and untrusted-content fencing), site crawling, the org chart, kickoff, handoffs, alignment, escalation and recovery, hiring policy and approval, the knowledge base (safety filter, retrieval, promotion and retirement, consolidation, learning about learning), the learning loop, reuse of hired specialists, work-aware chat, lean versus full conversation cost, and the live path against scripted fakes of the Messages API: tool use, asking teammates, hiring mid-task, saving lessons, reflection, retrospectives, study, prompt-injection resistance, truncation recovery, revisions and timeouts.
+Ninety-one tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (including private-address and redirect protection and untrusted-content fencing), site crawling, the org chart, kickoff, handoffs, alignment, escalation and recovery, hiring policy and approval, the knowledge base (safety filter, retrieval, promotion and retirement, consolidation, learning about learning), the learning loop, reuse of hired specialists, upstream skill sync (hardened archive reading, validation, overlay, rollback, approval) and hiring from newly added playbooks, work-aware chat, lean versus full conversation cost, and the live path against scripted fakes of the Messages API: tool use, asking teammates, hiring mid-task, saving lessons, reflection, retrospectives, study, prompt-injection resistance, truncation recovery, revisions and timeouts.
 
 ## Licence and credits
 

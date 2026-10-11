@@ -9,17 +9,20 @@ import { Life } from '../server/life.js';
 import { LLM } from '../server/llm.js';
 import { Company } from '../server/company.js';
 
-export function world({ life = false, learning = 'passive', web = false, collab = 'full', hiring = 'auto' } = {}) {
+export function world({ life = false, learning = 'passive', web = false, collab = 'full', hiring = 'auto', syncFor = null } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '4evr-'));
   const map = buildMap();
   const skills = loadSkills();
+  const sync = syncFor ? syncFor(skills, tmp) : null;
   const llm = new LLM(); llm.apiKey = ''; llm.mode = 'mock';
   const sim = new Sim(map, AGENTS);
   const company = new Company({ sim, llm, skills, dataDir: path.join(tmp, 'data'), deliverablesDir: path.join(tmp, 'deliverables') });
   const l = new Life(sim, company);
+  company.skillIndexFn = () => Object.values(skills).map((s) => ({ name: s.name }));
+  if (sync) company.attachSkillSync(sync);
   company.life = l; company.webResearch = web; company.kb.mode = learning; company.collab = collab; company.hiringMode = hiring;
   if (life) l.start();
-  return { map, skills, llm, sim, company, life: l, tmp };
+  return { map, skills, llm, sim, company, life: l, tmp, sync };
 }
 
 /** Advance the simulation faster than real time until `done()` or the sim-time budget runs out. */

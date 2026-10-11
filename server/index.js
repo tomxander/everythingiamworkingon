@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { buildMap, TILE } from './map.js';
 import { AGENTS, COMPANY, DEPT_META } from './roster.js';
-import { loadSkills, skillIndex } from './skills.js';
+import { loadSkills, skillIndex, SKILLS_DIR } from './skills.js';
+import { SkillSync } from './skillsync.js';
 import { Sim } from './sim.js';
 import { Life } from './life.js';
 import { LLM } from './llm.js';
@@ -21,12 +22,19 @@ const DATA = process.env.DATA_DIR || path.join(root, 'data');
 const DELIV = process.env.DELIVERABLES_DIR || path.join(root, 'deliverables');
 
 const map = buildMap();
-const skills = loadSkills();
+// The skills library: the vendored copy, with anything newer fetched from the upstream repo layered on top.
+let vendoredCommit = null;
+try { vendoredCommit = JSON.parse(fs.readFileSync(path.join(SKILLS_DIR, '..', '.upstream.json'), 'utf8')).commit; } catch { /* unknown, fine */ }
+const skills = {};
+const skillSync = new SkillSync({ skills, baseDir: SKILLS_DIR, dataDir: DATA, vendoredCommit });
+Object.assign(skills, loadSkills(skillSync.dirs));
 const llm = new LLM();
 const sim = new Sim(map, AGENTS);
 const company = new Company({ sim, llm, skills, dataDir: DATA, deliverablesDir: DELIV });
 const life = new Life(sim, company);
 company.life = life;
+company.skillIndexFn = () => skillIndex(skills);
+company.attachSkillSync(skillSync);
 const restored = company.load();
 life.start();
 
@@ -77,7 +85,7 @@ company.on('broadcast', broadcast);
 
 function settings() {
   const s = llm.status();
-  return { mode: s.mode, hasKey: s.hasKey, model: s.model, price: s.price, budgetCap: company.budgetCap, lastError: s.lastError, collab: company.collab, hiring: company.hiringMode, learning: company.kb.mode, webResearch: company.webResearch };
+  return { mode: s.mode, hasKey: s.hasKey, model: s.model, price: s.price, budgetCap: company.budgetCap, lastError: s.lastError, collab: company.collab, hiring: company.hiringMode, learning: company.kb.mode, webResearch: company.webResearch, skills: skillSync.status() };
 }
 
 function initPayload() {
@@ -89,7 +97,7 @@ function initPayload() {
     kb: { summary: company.kb.summary(), lessons: company.kb.view(250), playbooks: company.kb.playbooks, notes: company.kb.notes.slice(0, 30), events: company.kb.events.slice(-20) },
     hiring: company.hiringStatus(),
     depts: DEPT_META,
-    skills: skillIndex(skills),
+    skills: skillIndex(skills), skillsSource: skillSync.status(),
     tasks: [...company.tasks.values()].map((t) => company.publicTask(t)),
     deliverables: [...company.deliverables.values()].map((d) => company.deliverableMeta(d)),
     comms: company.comms.slice(-200), log: company.log.slice(-200),
@@ -119,11 +127,16 @@ wss.on('connection', (ws) => {
         case 'setCollab': company.collab = ['full', 'lean', 'off'].includes(m.value) ? m.value : company.collab; broadcast({ type: 'settings', settings: settings() }); break;
         case 'setHiring': company.hiringMode = ['auto', 'ask', 'off'].includes(m.value) ? m.value : company.hiringMode; broadcast({ type: 'settings', settings: settings() }); break;
         case 'setLearning': company.kb.mode = ['active', 'passive', 'off'].includes(m.value) ? m.value : company.kb.mode; company.kb.touch(); broadcast({ type: 'settings', settings: settings() }); break;
-        case 'hire': company.godHire({ role: m.role, skills: m.skills, why: m.why, domain: m.domain }).catch((e) => send(ws, { type: 'toast', text: `Could not hire: ${e.message}`, level: 'warn' })); break;
+        case 'hire': company.godHire({ role: m.role, skills: m.skills, why: m.why, domain: m.domain, need: m.need }).catch((e) => send(ws, { type: 'toast', text: `Could not hire: ${e.message}`, level: 'warn' })); break;
         case 'fire': await company.fire(m.id); break;
         case 'hireDecision': company.decideHire(m.id, !!m.ok); break;
         case 'kbForget': company.kb.remove(m.id); break;
         case 'kbPin': company.kb.pin(m.id, m.value !== false); break;
+        case 'skillsCheck': skillSync.check({ force: true, reason: 'manual' }).then((r) => { broadcast({ type: 'settings', settings: settings() }); send(ws, { type: 'toast', text: r.result === 'up-to-date' ? 'The skills library is up to date.' : r.result === 'error' ? `Could not check for updates: ${r.error}` : `Skills: ${r.result}`, level: r.result === 'error' ? 'warn' : 'info' }); }); break;
+        case 'skillsApprove': skillSync.approve(); broadcast({ type: 'settings', settings: settings() }); break;
+        case 'skillsDecline': skillSync.decline(); broadcast({ type: 'settings', settings: settings() }); break;
+        case 'skillsRollback': skillSync.rollback(); broadcast({ type: 'settings', settings: settings() }); break;
+        case 'setSkillsMode': skillSync.mode = ['auto', 'ask', 'off'].includes(m.value) ? m.value : skillSync.mode; broadcast({ type: 'settings', settings: settings() }); break;
         case 'setBudget': company.budgetCap = Math.max(0.1, Number(m.value) || 5); broadcast({ type: 'settings', settings: settings() }); break;
         case 'deliverable': { const d = company.deliverables.get(m.id); if (d) send(ws, { type: 'deliverable_full', deliverable: d }); break; }
         case 'skill': { const s = skills[m.name]; if (s) send(ws, { type: 'skill_full', skill: { name: s.name, title: s.title, description: s.description, body: s.body, references: s.references } }); break; }
@@ -141,6 +154,9 @@ setInterval(() => { const now = Date.now(); sim.tick((now - last) / 1000); last 
 setInterval(() => { if (wss.clients.size) broadcast({ type: 'tick', snapshot: sim.snapshot() }); }, 100);
 setInterval(() => { company.sampleHistory(); if (wss.clients.size) broadcast({ type: 'stats', stats: company.stats(), settings: settings() }); }, 2000);
 setInterval(() => company.save(), 20000);
+// look for newer playbooks shortly after start and every six hours (hiring also checks, throttled to every ten minutes)
+setTimeout(() => skillSync.check({ reason: 'startup' }), 45_000).unref();
+setInterval(() => skillSync.check({ reason: 'scheduled' }), 6 * 3600 * 1000).unref();
 let kbSent = -1;
 setInterval(() => { if (wss.clients.size && company.kb.version !== kbSent) { kbSent = company.kb.version; broadcast({ type: 'kb', kb: { summary: company.kb.summary(), lessons: company.kb.view(250), playbooks: company.kb.playbooks, notes: company.kb.notes.slice(0, 30), events: company.kb.events.slice(-20) } }); } }, 2500);
 

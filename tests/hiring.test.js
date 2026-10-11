@@ -36,9 +36,9 @@ test('hiring is refused when an existing teammate already covers the skills and 
   await assert.rejects(w.company.hire(null, { role: 'Junior SEO Specialist', skills: ['seo-audit', 'site-architecture'], why: 'more SEO' }), /Rafael.*already covers/s);
   const ok = await settle(w, w.company.hire(null, { role: 'SEO Associate', skills: ['seo-audit'], why: 'Rafa is swamped', capacity: true }));
   assert.equal(ok.hired, true);
-  await assert.rejects(w.company.hire(null, { role: 'Nobody', skills: [], why: 'x' }), /at least one skill/);
+  await assert.rejects(w.company.hire(null, { role: 'Nobody', skills: [], why: 'x' }), /No playbook in the skills library/);
   await assert.rejects(w.company.hire(null, { role: 'x', skills: ['seo-audit'], why: 'x' }), /clear job title/);
-  await assert.rejects(w.company.hire(null, { role: 'Wizard', skills: ['not-a-skill'], why: 'x' }), /at least one skill/);
+  await assert.rejects(w.company.hire(null, { role: 'Wizard', skills: ['not-a-skill'], why: 'x' }), /No playbook in the skills library/);
 });
 
 test('guardrails: per-task cap, headcount cap, total cap, full annex, and hiring switched off', async () => {
