@@ -116,3 +116,21 @@ test('escalation: a workstream that fails twice is cut and flagged, and the task
   assert.ok(w.company.comms.some((c) => c.kind === 'decision' && /failed twice/.test(c.text)));
   assert.ok(w.company.kb.view().some((l) => l.source === 'failure'), 'a failure lesson was recorded');
 });
+
+test('lean: fewer model calls than full, but still kicks off, hands off, aligns and learns', async () => {
+  const count = async (collab) => {
+    const w = world({ collab }); let calls = 0; const real = w.llm.complete.bind(w.llm);
+    w.llm.complete = async (o) => { calls++; return real(o); };
+    const t = w.company.submitTask({ title: 'Get acme.test more leads', brief: '' });
+    assert.ok(await run(w.sim, () => t.status === 'done' && t.retro !== undefined && (collab !== 'full' || (t.meetings || []).some((m) => m.type === 'retro' && m.summary)), 3000));
+    return { w, t, calls };
+  };
+  const full = await count('full'); const lean = await count('lean'); const off = await count('off');
+  assert.ok(lean.calls < full.calls && off.calls < lean.calls, `calls: full ${full.calls} > lean ${lean.calls} > off ${off.calls}`);
+  const k = lean.t.meetings.find((m) => m.type === 'kickoff'); assert.ok(k, 'lean still has a kickoff');
+  const spoke = new Set(k.turns.map((x) => x.agent)); assert.ok([...spoke].every((id) => id === 'vera' || lean.w.company.agent(id).lead), 'only the leads speak in a lean kickoff');
+  assert.ok(lean.w.company.comms.some((c) => c.kind === 'handoff'), 'handoffs still happen');
+  assert.ok(lean.t.decisions.length >= 1, 'alignment still decides');
+  assert.ok(!(lean.t.meetings || []).some((m) => m.type === 'retro'), 'but there is no retro meeting');
+  assert.ok(lean.t.retro && lean.w.company.kb.view().length > 0, 'while the lessons are still recorded');
+});

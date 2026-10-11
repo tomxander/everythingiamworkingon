@@ -152,11 +152,11 @@ export class Life {
     const mates = others.filter((o) => o.dept === a.dept);
     const b = mates.length && Math.random() < 0.6 ? choice(mates) : choice(others); // people talk to their own team more
     b.ambientLock = true; sim.claim(b);
-    try { await this.talkPair(a, b, tok, { visit: true }); } finally { b.ambientLock = false; }
+    try { const link = this.bus.workChat?.(a, b); await this.talkPair(a, b, tok, { visit: true, lines: link?.lines, taskId: link?.taskId }); } finally { b.ambientLock = false; }
   }
 
   /** Two agents have a short ambient conversation. */
-  async talkPair(a, b, tok, { visit = false, meetAt } = {}) {
+  async talkPair(a, b, tok, { visit = false, meetAt, lines, taskId } = {}) {
     const sim = this.sim; const ptok = b.tok;
     sim.setStatus(a, `Chatting with ${b.short}`); sim.setStatus(b, `Chatting with ${a.short}`);
     let ok;
@@ -172,10 +172,11 @@ export class Life {
       a.dir = 'left';
     }
     if (!ok || tok.cancelled || ptok.cancelled) return;
-    const [l1, l2] = smallTalk(Math.random() * 1e6);
-    a.pose = 'talk'; sim.say(a, l1, 4.5); this.bus.emit('comms', { from: a.id, to: b.id, text: l1, kind: 'banter' });
+    const [l1, l2] = lines || smallTalk(Math.random() * 1e6);
+    const kind = lines ? 'status' : 'banter'; // shared work gets talked about, not just the weather
+    a.pose = 'talk'; sim.say(a, l1, 4.5); this.bus.emit('comms', { from: a.id, to: b.id, text: l1, kind, taskId });
     await sim.sleep(4.8, tok); if (tok.cancelled) return;
-    b.pose = 'talk'; a.pose = 'stand'; sim.say(b, l2, 4.5); this.bus.emit('comms', { from: b.id, to: a.id, text: l2, kind: 'banter' });
+    b.pose = 'talk'; a.pose = 'stand'; sim.say(b, l2, 4.5); this.bus.emit('comms', { from: b.id, to: a.id, text: l2, kind, taskId });
     await sim.sleep(4.8, tok);
     a.mood = Math.min(100, a.mood + 4); b.mood = Math.min(100, b.mood + 4);
     a.pose = 'stand'; b.pose = 'stand';

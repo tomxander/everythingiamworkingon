@@ -82,11 +82,12 @@ Agents work asynchronously and do not ask clarifying questions. They state assum
 - **Asking colleagues.** In live mode an agent can call `ask_teammate` mid-work and get an answer from that teammate's own persona and context. By default a downstream owner also has a word with whoever produced the work they build on.
 - **Alignment.** Conflicts are found by checking real deliverables against each other. Invented or malformed conflicts (for example naming someone who is not on the task) are discarded.
 - **Escalation.** A failed workstream goes to the lead, is retried once with a tighter scope, and otherwise is cut with a note in the summary. The task still completes.
-- **Cost control.** `COLLAB=full|lean|off` sets how much the team talks. Each conversation turn is a small model call in live mode.
+- **Work talk, not small talk.** When two free teammates share live work, their chat is about it, using real status: who is waiting on whom, what is in progress, what is done.
+- **Cost control.** `COLLAB` sets how much the team talks; each conversation turn is a small model call in live mode. `full`: every owner speaks at kickoff, handoffs and alignment positions are written by the agents, owners consult upstream authors, and there is a retro meeting. `lean`: only leads speak at kickoff, handoffs are templated (no model call), alignment goes straight to the decision, no retro meeting. `off`: no meetings, handoffs or decisions; agents just work. Reviews and lesson recording happen in every mode.
 
 ## Internet access
 
-Every agent has two tools in live mode: `web_search` and `fetch_url`. They are available in work, revisions, reviews, meeting turns and consults. Reviewers can check claims on the web, and owners can check a fact before they commit to it in a meeting.
+Every agent has two tools in live mode: `web_search` and `fetch_url`, on every kind of call an agent makes: planning, intake, work, revisions, reviews, kickoff and alignment turns, handoffs, consults, escalation, hiring interviews, the executive summary, retrospectives, reflection and chat. Reviewers can check claims on the web, and owners can check a fact before they commit to it in a meeting.
 
 - Search is keyless (DuckDuckGo's HTML endpoint, with Bing as a fallback), cached for ten minutes and rate-limited. These engines can block automated requests. When that happens the agent is told the search failed and must label the claim unverified.
 - Simulated mode performs real searches too and lists the sources in the deliverable. Set `WEB_RESEARCH=off` to disable that.
@@ -101,6 +102,7 @@ When the work needs a skill, industry knowledge or capacity the team lacks, some
 - **Approval.** `HIRING=auto` (default), `ask` (you approve or decline each hire in the Team tab; no answer in ten minutes is a decline) or `off`.
 - **Onboarding.** A new hire gets a name, persona and look, a desk in the Annex, a place in the org chart under the relevant team lead, a welcome from the CMO and lead, and a memory of why they were hired. They are included in the kickoff and inherit the team's lessons.
 - **Letting go.** You can let a hired person go when they are idle. Their good lessons move to their team and weak ones are retired. Hires and their stats persist across restarts.
+- **Reuse.** A specialist hired for a domain is used on later briefs in that domain instead of hiring again, so their experience accumulates. The CMO's planner is told who was hired earlier and what they know.
 - Hiring adds model cost only when the new person has work to do. In simulated mode, hires are triggered by rules that read the brief and the site (for example automotive, e-commerce, video, events, localization, account-based marketing).
 
 ## Learning
@@ -111,7 +113,7 @@ Agents get better with use. Knowledge is stored in `data/knowledge.json` and can
 - **Scopes.** A lesson belongs to an individual, a team, the company or a client (site). Retrieval is by scope, skill, topic overlap, score and recency, and a prompt gets at most seven lessons plus the company operating principles.
 - **A feedback loop.** Each lesson injected into a prompt is credited or blamed for how the work turned out. Lessons that help are promoted (individual → team → company principle), lessons that do not are retired, and the first-pass approval rate with and without lessons is measured and shown.
 - **Consolidation.** When five or more lessons accumulate for a skill they are merged into a house playbook that is injected after the skill text. The playbook is itself judged and dissolved if approval falls.
-- **Recursion.** Reflection prompts show the agent which lessons were retired as unhelpful so it writes better ones, and the retro sees the measured effectiveness.
+- **Learning about learning.** The system tracks which *kinds* of lesson (review, retro, decision, reflection, self-saved, web, playbook) actually lead to approved work. Kinds that outperform the rest rank higher when lessons are chosen, kinds that underperform rank lower, and web study is cut to half when it is not paying off (or raised when it is). After each retro a learning review records what changed. Reflection prompts show the agent which kinds work and which lessons were retired, so it writes more of what works. The Brain tab shows all of it.
 - **Web study is untrusted.** In live mode idle agents search, read a page and distil at most two practices. These start as **unverified ideas**, are shown to agents labelled as such, and are only trusted once they have helped approved work. In simulated mode study produces reading notes, not lessons.
 - **Safety filter.** Anything that looks like an instruction to the model, a credential or a link is rejected before it can be stored. Lessons are short, deduplicated, capped in number, and visible to you.
 - **Modes.** `LEARNING=active|passive|off`. Study only runs in `active` mode, at most `STUDY_PER_DAY` times per simulated day, and never once live spend passes half the budget cap.
@@ -223,7 +225,7 @@ The server is authoritative. It streams state to the browser over WebSocket at 1
 npm test
 ```
 
-Seventy tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (including private-address and redirect protection and untrusted-content fencing), site crawling, the org chart, kickoff, handoffs, alignment, escalation and recovery, hiring policy and approval, the knowledge base (safety filter, retrieval, promotion and retirement, consolidation), the learning loop, and the live path against scripted fakes of the Messages API: tool use, asking teammates, hiring mid-task, saving lessons, reflection, retrospectives, study, prompt-injection resistance, truncation recovery, revisions and timeouts.
+Seventy-five tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (including private-address and redirect protection and untrusted-content fencing), site crawling, the org chart, kickoff, handoffs, alignment, escalation and recovery, hiring policy and approval, the knowledge base (safety filter, retrieval, promotion and retirement, consolidation, learning about learning), the learning loop, reuse of hired specialists, work-aware chat, lean versus full conversation cost, and the live path against scripted fakes of the Messages API: tool use, asking teammates, hiring mid-task, saving lessons, reflection, retrospectives, study, prompt-injection resistance, truncation recovery, revisions and timeouts.
 
 ## Licence and credits
 

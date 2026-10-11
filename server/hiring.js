@@ -90,7 +90,7 @@ export const hiring = {
     const fallback = { first: nm.first, last: nm.last, persona: tpl?.persona || `${role}. Brings deep specialist knowledge${domain ? ` of ${domain}` : ''} and works closely with ${lead.short}. Prefers evidence to opinion and writes things down.`, quirks: tpl?.quirks || ['What does the evidence say?', 'Let me check that first.', 'Write it down so the next person can use it.'] };
     try {
       const res = await this.llm.complete({
-        kind: 'hire', maxTokens: 400,
+        kind: 'hire', maxTokens: 400, ...this.toolkit(this.agent('vera'), task, { light: true }),
         system: this.personaSystem(this.agent('vera'), 'You are finalising a hire. Create a credible colleague profile.'),
         user: `New role: ${role}\nSkills they will own: ${skills.join(', ')}\nWhy we need them: ${why}\nDomain: ${domain || 'general'}\nTeam: ${DEPT_META[dept].label}, reporting to ${lead.name}\nFirst names already taken: ${[...taken].join(', ')}\n\nReply with JSON only: {"first":"first name","last":"last name","persona":"2 sentences: how they work and what they care about","quirks":["three short things they often say"]}`,
         ctx: { profile: fallback, title: role },
@@ -143,7 +143,18 @@ export const hiring = {
     const mock = this.llm.mode === 'mock';
     const siteText = (task.sources || []).flatMap((s) => s.pages.map((p) => p.title)).join(' ');
     let specs;
-    if (mock) specs = hireRulesFor(`${task.title} ${task.brief} ${siteText}`, this.existingDomains()).map((r) => ({ role: r.role, skills: r.skills, domain: r.domain, why: `The brief is in the ${r.domain} domain and nobody on the team has worked in it.`, assignment: r.step, dept: r.dept }));
+    if (mock) {
+      const text = `${task.title} ${task.brief} ${siteText}`;
+      specs = hireRulesFor(text, this.existingDomains()).map((r) => ({ role: r.role, skills: r.skills, domain: r.domain, why: `The brief is in the ${r.domain} domain and nobody on the team has worked in it.`, assignment: r.step, dept: r.dept }));
+      // someone hired for this domain on an earlier task is the right person: use them, do not hire again
+      for (const r of HIRE_ROLES) {
+        if (!r.re.test(text)) continue;
+        const known = [...this.sim.agents.values()].find((a) => a.hired && a.domains?.includes(r.domain));
+        if (!known || plan.steps.some((st) => st.agent === known.id)) continue;
+        this.insertLeadingStep(plan, known.id, this.skills[r.step[0]] ? r.step[0] : known.skills[0], r.step[1]);
+        this.talk(task, { from: 'vera', to: 'all', kind: 'hire', text: `${known.short} already knows the ${r.domain} domain from earlier work, so I am putting them on this instead of hiring.` });
+      }
+    }
     else specs = (Array.isArray(rawHires) ? rawHires : []).slice(0, this.hiringCaps.perTask).map((h) => ({ role: h.role, skills: h.skills, domain: h.domain, why: h.why, assignment: h.assignment }));
     const made = [];
     for (const [i, spec] of specs.entries()) {

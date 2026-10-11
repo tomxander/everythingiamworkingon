@@ -141,3 +141,30 @@ test('the loop closes: a critique becomes a lesson, the next deliverable acts on
   assert.match(second, /Success check: review at day 14/);
   assert.ok(!/Cut the assumptions to the three/.test(t2.subtasks[0].review.text), 'so the reviewer no longer raises that point');
 });
+
+test('the learning review adjusts how the company learns, tells everyone, and changes the study budget', async () => {
+  const w = world({ learning: 'active' }); const c = w.company; const t = { id: 'T1', retro: {} };
+  c.kb.srcStats = { review: { uses: 30, wins: 28 }, web: { uses: 12, wins: 3 }, retro: { uses: 14, wins: 10 } };
+  c.learningReview(t);
+  assert.ok(t.retro.learning.some((n) => /review lessons are the most reliable/.test(n)));
+  assert.ok(t.retro.learning.some((n) => /Web ideas are not paying off, so agents will study less/.test(n)));
+  assert.ok(c.kb.events.some((e) => /Learning review/.test(e.text)) && c.log.some((l) => /Learning review/.test(l.text)));
+  c._studyDay = c.sim.day; c._studyToday = 3; assert.equal(c.canStudy(), true); c._studyToday = 4; assert.equal(c.canStudy(), false, 'default 8 a day is halved to 4');
+  const before = c.kb.events.length; c.learningReview(t); assert.equal(c.kb.events.length, before, 'it does not repeat itself');
+});
+
+test('teammates with shared live work talk about it, with their real status, not small talk', async () => {
+  const w = world(); const c = w.company;
+  const t = c.submitTask({ title: 'Get acme.test more leads', brief: '' });
+  assert.ok(await run(w.sim, () => t.subtasks.length > 0 && t.subtasks.some((s) => s.status === 'working'), 600));
+  const dep = t.subtasks.find((s) => s.deps.length && s.status !== 'done'); const up = t.subtasks[dep.deps[0]];
+  const a = c.agent(dep.agent), b = c.agent(up.agent);
+  const link = c.workChat(a, b); assert.ok(link, 'they share work'); assert.equal(link.taskId, t.id);
+  assert.match(link.lines[0], new RegExp(`where are you on the ${up.skill}`)); assert.match(link.lines[0], new RegExp(`my ${dep.skill}`));
+  assert.match(link.lines[1], up.status === 'done' ? /Finished/ : up.status === 'working' ? /In progress/ : /Not started/, 'the answer matches the real status');
+  const other = [...c.sim.agents.values()].find((x) => !t.subtasks.some((s) => s.agent === x.id));
+  assert.equal(c.workChat(a, other), null, 'people with no shared work just chat');
+  const before = c.comms.length; let done = false; c.life.talkPair(a, b, a.tok, { visit: true, lines: link.lines, taskId: t.id }).then(() => (done = true), () => (done = true));
+  await run(w.sim, () => done, 300); // the conversation takes simulated time: drive the clock
+  assert.ok(c.comms.slice(before).some((m) => m.kind === 'status' && m.taskId === t.id && m.text === link.lines[0]));
+});

@@ -39,6 +39,7 @@ export class Knowledge {
     this.dir = dir; this.lessons = new Map(); this.playbooks = {}; this.notes = []; this.seq = 0;
     this.stats = { rejected: 0, merged: 0, retired: 0, promoted: 0, consolidated: 0, studySessions: 0 };
     this.outcomes = { withLessons: { ok: 0, total: 0 }, without: { ok: 0, total: 0 } };
+    this.srcStats = {}; // how well each KIND of lesson (review, web, retro, ...) has actually worked
     this.mode = process.env.LEARNING || 'active'; // off | passive | active
     this.version = 0; // bumps on any change so the UI knows to refresh
     this.events = [];
@@ -106,12 +107,31 @@ export class Knowledge {
       const lt = sig(`${l.text} ${l.tags.join(' ')}`); let inter = 0; for (const x of q) if (lt.has(x)) inter++;
       r += Math.min(0.4, inter * 0.08);
       r *= 0.5 + this.score(l); // proven lessons count for more
+      r *= this.sourceWeight(l.source); // and so do kinds of lesson that have proven reliable
       if (l.unverified) r *= 0.6;
       if (l.pinned) r += 0.3;
       r *= Math.pow(0.5, (now - (l.updated || l.created)) / (1000 * 3600 * 24 * 90)); // slow decay (90-day half-life)
       if (r > 0.2) scored.push([r, l]);
     }
     return scored.sort((a, b) => b[0] - a[0]).slice(0, limit).map((x) => x[1]);
+  }
+
+  // ---- learning about learning: which kinds of lesson actually help? ----
+  overallRate() { let u = 0, w = 0; for (const s of Object.values(this.srcStats)) { u += s.uses; w += s.wins; } return u ? w / u : null; }
+  sourceWeight(src) {
+    const s = this.srcStats[src]; const all = this.overallRate();
+    if (!s || s.uses < 8 || all == null) return 1;
+    return Math.max(0.6, Math.min(1.4, 1 + (s.wins / s.uses - all) * 1.5)); // relative to how everything else is doing
+  }
+  /** Studying the web is worth more of the agents' time only if what it finds actually helps. */
+  studyFactor() {
+    const s = this.srcStats.web; const all = this.overallRate();
+    if (!s || s.uses < 6 || all == null) return 1;
+    const rate = s.wins / s.uses;
+    return rate < all - 0.15 ? 0.5 : rate > all + 0.1 ? 1.5 : 1;
+  }
+  sourceReport() {
+    return Object.entries(this.srcStats).filter(([, s]) => s.uses >= 1).map(([source, s]) => ({ source, uses: Number(s.uses.toFixed(1)), rate: Math.round((s.wins / s.uses) * 100), weight: Number(this.sourceWeight(source).toFixed(2)) })).sort((a, b) => b.uses - a.uses);
   }
 
   /** Company-wide operating principles (rules), strongest first. Injected for everyone. */
@@ -148,6 +168,8 @@ export class Knowledge {
     if (!ids?.length) return;
     const w = 1 / Math.max(1, ids.length / 2); // shared credit: many lessons, each gets a share
     for (const id of ids) {
+      const src = id.startsWith('PB:') ? 'playbook' : this.lessons.get(id)?.source;
+      if (src) { const st = (this.srcStats[src] ||= { uses: 0, wins: 0 }); st.uses += w; if (ok) st.wins += w; }
       if (id.startsWith('PB:')) { const pb = this.playbooks[id.slice(3)]; if (pb) { pb.uses++; if (ok) pb.wins++; else pb.losses++; this.checkPlaybook(id.slice(3)); } continue; }
       const l = this.lessons.get(id); if (!l || l.retired) continue;
       l.uses += w; if (ok) { l.wins += w; if (taskId && !l.winTasks?.includes(taskId)) (l.winTasks ||= []).push(taskId); } else l.losses += w;
@@ -220,7 +242,7 @@ export class Knowledge {
     const rate = (b) => (b.total ? Math.round((b.ok / b.total) * 100) : null);
     return {
       mode: this.mode, version: this.version, active: act.length, byScope: { company: act.filter((l) => l.scope === 'company').length, team: act.filter((l) => l.scope === 'team').length, agent: act.filter((l) => l.scope === 'agent').length, client: act.filter((l) => l.scope === 'client').length },
-      unverified: act.filter((l) => l.unverified).length, avgScore: Number(avg.toFixed(2)), playbooks: Object.keys(this.playbooks).length, ...this.stats,
+      sources: this.sourceReport(), studyFactor: this.studyFactor(), unverified: act.filter((l) => l.unverified).length, avgScore: Number(avg.toFixed(2)), playbooks: Object.keys(this.playbooks).length, ...this.stats,
       approval: { withLessons: rate(this.outcomes.withLessons), without: rate(this.outcomes.without), nWith: this.outcomes.withLessons.total, nWithout: this.outcomes.without.total },
     };
   }
@@ -235,7 +257,7 @@ export class Knowledge {
     try {
       fs.mkdirSync(this.dir, { recursive: true });
       const tmp = path.join(this.dir, 'knowledge.json.tmp');
-      fs.writeFileSync(tmp, JSON.stringify({ v: 1, seq: this.seq, lessons: [...this.lessons.values()], playbooks: this.playbooks, notes: this.notes, stats: this.stats, outcomes: this.outcomes, events: this.events, mode: this.mode }));
+      fs.writeFileSync(tmp, JSON.stringify({ v: 1, seq: this.seq, lessons: [...this.lessons.values()], playbooks: this.playbooks, notes: this.notes, stats: this.stats, outcomes: this.outcomes, srcStats: this.srcStats, events: this.events, mode: this.mode }));
       fs.renameSync(tmp, path.join(this.dir, 'knowledge.json'));
     } catch (e) { console.error('knowledge save failed', e.message); }
   }
@@ -245,7 +267,7 @@ export class Knowledge {
     try {
       const d = JSON.parse(fs.readFileSync(f, 'utf8'));
       this.seq = d.seq || 0; this.lessons = new Map((d.lessons || []).map((l) => [l.id, l])); this.playbooks = d.playbooks || {}; this.notes = d.notes || [];
-      this.stats = { ...this.stats, ...d.stats }; this.outcomes = d.outcomes || this.outcomes; this.events = d.events || []; if (d.mode && !process.env.LEARNING) this.mode = d.mode;
+      this.stats = { ...this.stats, ...d.stats }; this.outcomes = d.outcomes || this.outcomes; this.srcStats = d.srcStats || {}; this.events = d.events || []; if (d.mode && !process.env.LEARNING) this.mode = d.mode;
       return true;
     } catch (e) { console.error('knowledge load failed', e.message); return false; }
   }

@@ -79,7 +79,9 @@ export const collab = {
     const vera = this.agent('vera'); const sim = this.sim;
     const info = task.subtasks.map((s) => ({ idx: s.idx, agent: s.agent, short: this.agent(s.agent).short, skill: s.skill, instruction: s.instruction, deps: s.deps.map((d) => this.agent(task.subtasks[d].agent).short) }));
     const owners = uniq(task.subtasks.map((s) => s.agent)).filter((id) => id !== 'vera');
-    const speakers = [...owners.filter((id) => this.agent(id).lead), ...owners.filter((id) => !this.agent(id).lead)];
+    const leads = owners.filter((id) => this.agent(id).lead);
+    // full: every owner speaks (leads first). lean: only the leads, to keep the number of model calls down.
+    const speakers = this.collab === 'lean' ? (leads.length ? leads : owners.slice(0, 1)) : [...leads, ...owners.filter((id) => !this.agent(id).lead)];
     const m = this.newMeeting(task, 'kickoff', `Kickoff: ${clip(task.title, 50)}`, ['vera', ...speakers]);
     let free = [];
     try {
@@ -129,13 +131,14 @@ export const collab = {
         const b = this.agent(ds.agent); if (!b) continue;
         const assumption = (deliverable.markdown.match(/## Assumptions\n([\s\S]*?)(?:\n##|$)/) || [])[1]?.split('\n').find((l) => l.trim().startsWith('-'))?.replace(/^-\s*/, '').trim();
         const tk = this.toolkit(author, task, { light: true });
-        const res = await this.llm.complete({
+        const lean = this.collab === 'lean';
+        const res = lean ? { text: `${b.short}, handing you my ${sub.skill}. Headline: ${clip(String(sub.headline || 'see the deliverable').replace(/[.]+$/, ''), 120)}. Read the Assumptions section before you start.`, usage: { input: 0, output: 0 }, simulated: true } : await this.llm.complete({
           kind: 'handoff', maxTokens: 260, ...tk,
           system: this.personaSystem(author, 'You are handing your finished work to the next owner. Plain speech, 2 to 3 sentences, first person.'),
           user: `Your deliverable (${sub.skill}):\n${clip(deliverable.markdown, 2200)}\n\n${b.name}'s assignment (${ds.skill}): ${ds.instruction}\n\nWrite the handoff: the single most important finding for their work, any assumption you made that could change their approach, and the one thing you need back from them.`,
           ctx: { from: { short: author.short }, to: { short: b.short }, fromSkill: sub.skill, toSkill: ds.skill, headline: sub.headline, assumption },
         });
-        this.account(task, res); if (res.simulated) await this.sleepSim(0.6, tok);
+        if (!lean) { this.account(task, res); if (res.simulated) await this.sleepSim(0.6, tok); }
         this.talk(task, { from: author.id, to: b.id, kind: 'handoff', text: res.text });
         ds.handoff = clip(res.text, 600);
         if (this.collab === 'full') {
@@ -148,6 +151,20 @@ export const collab = {
     }
     if (lead && lead.id !== author.id && !down.some((d) => d.agent === lead.id)) this.talk(task, { from: author.id, to: lead.id, kind: 'status', text: `${sub.skill} is done. ${sub.headline ? clip(sub.headline, 140) : ''}` });
     this.pushTask(task);
+  },
+
+  /** Two teammates who are free right now: if they share live work, they talk about it, with real status. */
+  workChat(a, b) {
+    const word = (s) => (s.status === 'working' ? 'in progress' : s.status === 'done' ? 'done' : 'queued behind its dependencies');
+    for (const task of this.tasks.values()) {
+      if (!['active', 'review'].includes(task.status)) continue;
+      const sa = task.subtasks.find((s) => s.agent === a.id && s.status !== 'failed'), sb = task.subtasks.find((s) => s.agent === b.id && s.status !== 'failed');
+      if (!sa || !sb || (sa.status === 'done' && sb.status === 'done')) continue;
+      if (sa.deps.includes(sb.idx)) return { taskId: task.id, lines: [`${b.short}, where are you on the ${sb.skill}? I need it for my ${sa.skill}.`, sb.status === 'done' ? 'Finished. Check my handoff.' : sb.status === 'working' ? `In progress. You get the headline findings first.` : `Not started, I am ${sb.deps.length ? 'waiting on my inputs' : 'next in the queue'}.`] };
+      if (sb.deps.includes(sa.idx)) return { taskId: task.id, lines: [`${b.short}, my ${sa.skill} is ${word(sa)}.${sa.status === 'done' ? ' Check the handoff.' : ' Headline findings first, I promise.'}`, `Thanks. I will start the ${sb.skill} the moment it lands.`] };
+      return { taskId: task.id, lines: [`How is the ${sb.skill} going, ${b.short}?`, `${word(sb).replace(/^./, (c) => c.toUpperCase())}. Anything you need from me for the ${sa.skill}?`] };
+    }
+    return null;
   },
 
   // ------------------------------------------------------------ who reviews whom
@@ -190,7 +207,7 @@ export const collab = {
           await this.speak(task, m, vera, `${A.short} and ${B.short}: ${c.issue} ${c.question || ''}`.trim(), { kind: 'question', tok });
           const view = (x) => clip(this.deliverables.get(subs.find((s) => s.agent === x.id)?.outputId)?.markdown || '', 1200);
           let said = [];
-          for (const [me, other, side] of [[A, B, 0], [B, A, 1]]) {
+          for (const [me, other, side] of this.collab === 'lean' ? [] : [[A, B, 0], [B, A, 1]]) {
             const tk2 = this.toolkit(me, task, { light: true });
             const r = await this.llm.complete({
               kind: 'align_reply', maxTokens: 260, ...tk2,
@@ -204,7 +221,7 @@ export const collab = {
           const d = await this.llm.complete({
             kind: 'decision', maxTokens: 260,
             system: this.personaSystem(vera, 'You are the CMO making the call. State the decision, who owns it and by when, in 2 to 3 sentences. Pick one path, do not hedge.'),
-            user: `The conflict: ${c.issue}\n${A.short}: ${said[0]}\n${B.short}: ${said[1]}\n\nDecide.`, ctx: { rule: c.rule, title: task.title },
+            user: `The conflict: ${c.issue}\n${said.length ? `${A.short}: ${said[0]}\n${B.short}: ${said[1]}\n` : `${A.short} and ${B.short} have not been asked for their positions: decide from the deliverables.\n`}\nDecide.`, ctx: { rule: c.rule, title: task.title },
           });
           this.account(task, d); if (d.simulated) await this.sleepSim(0.6, tok);
           await this.speak(task, m, vera, d.text, { kind: 'decision', tok });
@@ -231,7 +248,7 @@ export const collab = {
     this.talk(task, { from: a.id, to: lead.id, kind: 'question', text: `I'm blocked on ${sub.skill}: ${clip(msg, 160)}. How do you want to handle it?` });
     this.addLog(`${a.name} escalated a failure on ${task.id} to ${lead.name}: ${msg}`, { type: 'system', agent: a.id, taskId: task.id });
     const retry = !sub.retried && this.collab !== 'off';
-    const r = await this.llm.complete({ kind: 'escalate_reply', maxTokens: 160, system: this.personaSystem(lead, 'A teammate is blocked. Decide in 1 to 2 sentences: retry with a tighter scope, or proceed without it.'), user: `${a.name} failed at ${sub.skill} on "${task.title}": ${msg}`, ctx: { error: msg, retry } }).catch(() => ({ text: retry ? 'Retry once with a tighter scope.' : 'Proceed without it.' }));
+    const r = await this.llm.complete({ kind: 'escalate_reply', maxTokens: 160, ...this.toolkit(lead, task, { light: true }), system: this.personaSystem(lead, 'A teammate is blocked. Decide in 1 to 2 sentences: retry with a tighter scope, or proceed without it.'), user: `${a.name} failed at ${sub.skill} on "${task.title}": ${msg}`, ctx: { error: msg, retry } }).catch(() => ({ text: retry ? 'Retry once with a tighter scope.' : 'Proceed without it.' }));
     this.talk(task, { from: lead.id, to: a.id, kind: 'decision', text: r.text });
     if (!retry) { this.learnFromFailure?.(task, sub, msg); return false; }
     sub.retried = true; sub.status = 'ready'; sub.error = null;

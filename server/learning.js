@@ -43,9 +43,9 @@ export const learning = {
       const known = this.kb.relevant({ agent: author.id, dept: author.dept, skill: sub.skill, host: this.kbHost(task), text: sub.instruction, limit: 8 }).map((l) => `- ${l.text}`).join('\n') || '- (none yet)';
       const retired = [...this.kb.lessons.values()].filter((l) => l.retired && l.retiredWhy?.startsWith('did not help') && (l.agent === author.id || l.skill === sub.skill)).slice(-4).map((l) => `- ${l.text}`).join('\n') || '- (none)';
       const res = await this.llm.complete({
-        kind: 'reflect', maxTokens: 450,
+        kind: 'reflect', maxTokens: 450, ...this.toolkit(author, task, { light: true }),
         system: this.personaSystem(author, 'You are reflecting on work you just finished so that you and your team do better next time.'),
-        user: `Task: ${task.title}\nYour skill: ${sub.skill}\nReviewer verdict: ${review.verdict}. Strength: ${review.strength || '-'}. Improvement: ${review.improvement || '-'}.\n\nLessons you already have for this kind of work:\n${known}\n\nLessons that were tried and retired because they did not help (write lessons of a different, more useful kind):\n${retired}\n\nWrite at most 2 NEW lessons that would change how you do this kind of work next time. Each must be a short, specific instruction to your future self, true beyond this one client, with no links and no client secrets. If nothing is worth recording, return an empty list.\nReply with JSON only: {"lessons":[{"text":"...","scope":"agent|team|client","tags":["..."]}]}`,
+        user: `Task: ${task.title}\nYour skill: ${sub.skill}\nReviewer verdict: ${review.verdict}. Strength: ${review.strength || '-'}. Improvement: ${review.improvement || '-'}.\n\nLessons you already have for this kind of work:\n${known}\n\nLessons that were tried and retired because they did not help (write lessons of a different, more useful kind):\n${retired}\n\nHow well each KIND of lesson has worked so far (share of approved work): ${this.kb.sourceReport().map((s) => `${s.source} ${s.rate}%`).join(', ') || 'no data yet'}. Write more of what works.\n\nWrite at most 2 NEW lessons that would change how you do this kind of work next time. Each must be a short, specific instruction to your future self, true beyond this one client, with no links and no client secrets. If nothing is worth recording, return an empty list.\nReply with JSON only: {"lessons":[{"text":"...","scope":"agent|team|client","tags":["..."]}]}`,
         ctx: { skillTitle: sub.skill, review },
       });
       this.account(task, res);
@@ -88,7 +88,7 @@ export const learning = {
       retried: task.subtasks.filter((s) => s.retried).map((s) => ({ agent: s.agent, skill: s.skill })), decisions: (task.decisions || []).map((d) => ({ issue: d.issue, decision: d.decision })),
       hires: (task.hires || []).map((id) => { const h = this.agent(id); return h ? { id, role: h.role, domain: h.domains?.[0] || null } : null; }).filter(Boolean),
       unreadableSites: unreadable.map((s) => s.host), pagesRead: (task.sources || []).reduce((n, s) => n + s.pages.length, 0), openQuestions: task.intake?.openQuestions?.length || 0,
-      lessonsUsed: done.reduce((n, s) => n + (s.lessonIds?.length || 0), 0),
+      lessonsUsed: done.reduce((n, s) => n + (s.lessonIds?.length || 0), 0), learningSources: this.kb.sourceReport(),
     };
     // simulated-mode retro: everything below comes from what actually happened
     const derived = { wentWell: [], wentWrong: [], lessons: [], rules: [] };
@@ -106,7 +106,7 @@ export const learning = {
     if (this.llm.mode === 'live') {
       try {
         const res = await this.withAgent(vera, async () => this.llm.complete({
-          kind: 'retro', maxTokens: 900,
+          kind: 'retro', maxTokens: 900, ...this.toolkit(vera, task, { light: true }),
           system: this.personaSystem(vera, 'You are leading the retrospective for a finished piece of client work. Be honest and specific. Prefer a few lessons that would genuinely change behaviour over many generic ones.'),
           user: `${JSON.stringify(facts)}\n\nTeam discussion:\n${this.threadText(task, 'vera', 3000) || '(none)'}\n\nEffectiveness so far: ${JSON.stringify(this.kb.summary().approval)}.\n\nReply with JSON only: {"wentWell":["..."],"wentWrong":["..."],"lessons":[{"scope":"agent|team|company","agent":"id (only for agent scope)","skill":"optional skill name","text":"short instruction","tags":["..."]}],"rules":["at most one company operating principle, only if it is a real change in how we work"]} with at most 4 lessons.`,
           ctx: { retro: derived },
@@ -126,7 +126,7 @@ export const learning = {
     task.retro = { wentWell: notes.wentWell, wentWrong: notes.wentWrong, lessons: ids };
     if (ids.length) (task.learned ||= []).push(...ids);
 
-    if (this.collab !== 'off') {
+    if (this.collab === 'full') { // lean and off still record the lessons, just without the meeting
       const m = this.newMeeting(task, 'retro', `Retrospective: ${clip(task.title, 44)}`, ['vera']); let free = [];
       try {
         await this.withAgent(vera, async (tok) => {
@@ -141,8 +141,23 @@ export const learning = {
         });
       } finally { this.release(free); this.pushTask(task); }
     }
+    this.learningReview(task);
     this.addLog(`Retrospective for ${task.id}: ${ids.length} lesson(s) recorded`, { type: 'system', taskId: task.id, agent: 'vera' });
     this.maybeConsolidate().catch(() => {});
+  },
+
+  /** The recursive step: look at how the learning itself is going, and change how the company learns. */
+  learningReview(task) {
+    const rep = this.kb.sourceReport().filter((s) => s.uses >= 8); if (!rep.length) return;
+    const best = [...rep].sort((a, b) => b.weight - a.weight)[0]; const worst = [...rep].sort((a, b) => a.weight - b.weight)[0];
+    const factor = this.kb.studyFactor(); const notes = [];
+    if (best.weight >= 1.1) notes.push(`${best.source} lessons are the most reliable (${best.rate}% of the work they influenced was approved), so they now rank higher.`);
+    if (worst.weight <= 0.9 && worst.source !== best.source) notes.push(`${worst.source} lessons help least (${worst.rate}%), so they now rank lower.`);
+    if (factor !== 1) notes.push(factor < 1 ? 'Web ideas are not paying off, so agents will study less.' : 'Web ideas are paying off, so agents will study more.');
+    const key = notes.join('|'); if (!notes.length || key === this._lastReviewKey) return; this._lastReviewKey = key;
+    for (const n of notes) this.kb.logEvent(`Learning review: ${n}`);
+    if (task?.retro) task.retro.learning = notes;
+    this.addLog(`Learning review: ${notes.join(' ')}`, { type: 'system', agent: 'vera', taskId: task?.id });
   },
 
   // ------------------------------------------------------------ consolidation into house playbooks
@@ -154,7 +169,7 @@ export const learning = {
         if (this.llm.mode === 'live') {
           try {
             const vera = this.agent('vera');
-            const res = await this.llm.complete({ kind: 'consolidate', maxTokens: 500, system: this.personaSystem(vera, 'You maintain the company playbooks.'), user: `Merge these lessons about ${skill} into at most 8 crisp, non-overlapping instructions, one per line, no numbering, no links, nothing that only applies to one client:\n${lessons.map((l) => `- ${l.text}`).join('\n')}`, ctx: { lessons: lessons.map((l) => l.text) } });
+            const res = await this.llm.complete({ kind: 'consolidate', maxTokens: 500, ...this.toolkit(vera, null, { light: true }), system: this.personaSystem(vera, 'You maintain the company playbooks.'), user: `Merge these lessons about ${skill} into at most 8 crisp, non-overlapping instructions, one per line, no numbering, no links, nothing that only applies to one client:\n${lessons.map((l) => `- ${l.text}`).join('\n')}`, ctx: { lessons: lessons.map((l) => l.text) } });
             this.account({ tokens: 0, cost: 0 }, res); text = res.text;
           } catch { text = null; }
         }
@@ -169,7 +184,7 @@ export const learning = {
   canStudy() {
     if (this.kb.mode !== 'active') return false;
     const day = this.sim.day; if (this._studyDay !== day) { this._studyDay = day; this._studyToday = 0; }
-    if (this._studyToday >= STUDY_PER_DAY) return false;
+    if (this._studyToday >= Math.max(1, Math.round(STUDY_PER_DAY * this.kb.studyFactor()))) return false; // studies more when it pays off, less when it does not
     if (this.llm.mode === 'live' && this.llm.totals.cost >= this.budgetCap * 0.5) return false; // learning never eats the client budget
     return true;
   },

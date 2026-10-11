@@ -96,3 +96,16 @@ test('hires survive a restart, with their desk and their lessons', async () => {
   assert.ok(w2.company.kb.view().some((l) => l.agent === a.id));
   assert.equal(w2.company.hires.size, 1);
 });
+
+test('a specialist hired once is reused on the next matching brief, not hired again', async () => {
+  const w = world(); const c = w.company;
+  const t1 = c.submitTask({ title: 'Get Acme Drives more leads', brief: 'ADAS software for automotive OEMs and tier-1 suppliers.' });
+  assert.ok(await finish(w, t1)); const bruno = c.agent(t1.hires[0]); assert.ok(bruno);
+  const before = [...c.sim.agents.values()].length;
+  const t2 = c.submitTask({ title: 'Plan SEO for Acme Drives', brief: 'The same automotive OEM audience; we need organic search.' });
+  assert.ok(await finish(w, t2)); assert.equal(t2.status, 'done', t2.error);
+  assert.equal(c.sim.agents.size, before, 'nobody new was hired'); assert.equal((t2.hires || []).length, 0);
+  assert.equal(t2.subtasks[0].agent, bruno.id, 'the existing specialist briefs the team first');
+  assert.ok(c.comms.some((m) => m.kind === 'hire' && m.taskId === t2.id && /already knows the automotive domain/.test(m.text)));
+  assert.ok(bruno.stats.deliverables >= 2, 'and their experience accumulates');
+});

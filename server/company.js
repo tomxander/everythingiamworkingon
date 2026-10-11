@@ -209,14 +209,14 @@ export class Company extends EventEmitter {
 
   async planTask(task, tok) {
     const roster = [...this.sim.agents.values()].filter((a) => a.id !== 'vera' || true);
-    const rosterText = roster.map((a) => `- ${a.id}: ${a.name}, ${a.role}. Skills: ${a.skills.join(', ')}`).join('\n');
+    const rosterText = roster.map((a) => `- ${a.id}: ${a.name}, ${a.role}. Skills: ${a.skills.join(', ')}.${a.domains?.length ? ` Domain expertise: ${a.domains.join(', ')}.` : ''}${a.hired ? ' (hired earlier: use them before hiring anyone new)' : ''}`).join('\n');
     const system = [
       `${COMPANY.charter}\n\nYou are Vera Quill, CMO of 4EVR. Your job right now is to turn God's request into a plan of 3 to 7 workstreams, each owned by exactly one teammate and one of THEIR listed skills. Parallelise where possible; use "deps" (0-based indexes of earlier workstreams) only when the work truly needs another's output. Optionally set "consult" to a teammate id who should be asked for a quick opinion first. Do not assign final executive summary work; you will write that yourself.\n\nTeam:\n${rosterText}`,
     ];
     const user = `Request title: ${task.title}\n\nBrief:\n${task.brief || '(none beyond the title)'}\n\n${this.contextText(task, 6000)}\n\nPlanning rules:\n- Tailor every workstream to the evidence above. Name the real pages, offers and gaps.\n- Nobody on the team can log in to ad accounts, analytics, a CRM or the client's CMS, or change the live site. Plan recommendations and ready-to-use assets, not actions inside those systems.\n- Match the goal type (${task.intake?.goalType || 'unknown'}): for inbound leads from a website plan conversion, SEO, copy, lead capture and nurture, paid and tracking. Use outbound or cold email only if the request asks for it.\n- Always include one workstream that makes the result measurable.${this.hiringMode === 'off' ? '' : `\n- Hiring: if the work needs domain expertise or capacity nobody on the team has (for example an industry specialist), you may hire. Add it to "hires" and assign a step to it with "agent":"hire:0" (its index in "hires"). Hire only when no current teammate can do the job well. Skills must come from the skill names the team already uses.`}\n\nReply with JSON only, in this shape:\n{"summary":"one sentence on the approach","hires":[{"role":"job title","skills":["skill-name"],"why":"why nobody here can do it","domain":"optional one word"}],"steps":[{"agent":"id","skill":"skill-name","instruction":"what exactly they must produce","deps":[],"consult":null}]}`;
     let raw = null;
     try {
-      const res = await this.llm.complete({ kind: 'plan', system, user, maxTokens: 1600, ctx: { title: task.title, brief: task.brief, intake: task.intake } });
+      const res = await this.llm.complete({ kind: 'plan', system, user, maxTokens: 1600, ...this.toolkit(this.agent('vera'), task, { light: true }), ctx: { title: task.title, brief: task.brief, intake: task.intake } });
       this.account(task, res);
       if (this.llm.mode === 'mock') await this.sleepSim(res.latencyMs / 1000, tok);
       raw = extractJson(res.text);
@@ -316,12 +316,12 @@ export class Company extends EventEmitter {
     const ok = await sim.goTo(a, { ...at, dir: 'left' }, { tok });
     if (!ok) return;
     const ctxQ = { title: task.title, to: { name: b.name, short: b.short, quirks: b.quirks }, from: a };
-    const q = await this.llm.complete({ kind: 'consult_q', system: `You are ${a.name}, ${a.role}. ${a.persona} Ask ${b.name} (${b.role}) one short, specific question to sharpen your ${sub.skill} work. One or two sentences, no preamble.`, user: `Task: ${task.title}\n${task.brief}\nYour assignment: ${sub.instruction}`, maxTokens: 120, ctx: ctxQ });
+    const q = await this.llm.complete({ kind: 'consult_q', ...this.toolkit(a, task, { light: true }), system: `You are ${a.name}, ${a.role}. ${a.persona} Ask ${b.name} (${b.role}) one short, specific question to sharpen your ${sub.skill} work. One or two sentences, no preamble.`, user: `Task: ${task.title}\n${task.brief}\nYour assignment: ${sub.instruction}`, maxTokens: 120, ctx: ctxQ });
     this.account(task, q); if (this.llm.mode === 'mock') await this.sleepSim(1.2, tok);
     a.pose = 'talk'; sim.say(a, q.text, 5.5); this.talk(task, { from: a.id, to: b.id, text: q.text, kind: 'consult' });
     b.dir = 'right';
     await this.sleepSim(4, tok);
-    const ans = await this.llm.complete({ kind: 'consult_a', system: `You are ${b.name}, ${b.role}. ${b.persona} Answer ${a.name}'s question in two sentences max with one concrete piece of advice from your craft.`, user: `Question: ${q.text}\nTask: ${task.title}\n${task.brief}`, maxTokens: 160, ctx: { title: task.title, to: b, from: a } });
+    const ans = await this.llm.complete({ kind: 'consult_a', ...this.toolkit(b, task, { light: true }), system: `You are ${b.name}, ${b.role}. ${b.persona} Answer ${a.name}'s question in two sentences max with one concrete piece of advice from your craft.`, user: `Question: ${q.text}\nTask: ${task.title}\n${task.brief}`, maxTokens: 160, ctx: { title: task.title, to: b, from: a } });
     this.account(task, ans);
     b.pose = 'talk'; a.pose = 'stand'; sim.say(b, ans.text, 5.5); this.talk(task, { from: b.id, to: a.id, text: ans.text, kind: 'consult' });
     a.stats.consults++; b.mood = Math.min(100, b.mood + 3);
@@ -389,7 +389,7 @@ export class Company extends EventEmitter {
       const user = `Synthesize the team's work into an executive summary for God on: ${task.title}\n\nBrief:\n${task.brief || '(title only)'}\n\n${this.contextText(task, 3000)}${(task.decisions || []).length ? `\n\n## Decisions made in alignment meetings\n${task.decisions.map((d) => `- ${d.issue} DECISION: ${d.decision}`).join('\n')}` : ''}${(task.hires || []).length ? `\n\n## People hired for this task\n${task.hires.map((id) => { const h = this.agent(id); return h ? `- ${h.name}, ${h.role}: ${h.why || ''}` : ''; }).join('\n')}` : ''}\n\nTeam output:\n${outputs.map((o) => `## ${o.agentName} (${o.skill})\n${clip(o.text, 2200)}`).join('\n\n')}\n\nWrite: The call (3 sentences), What each specialist contributed (one line each), Open questions for God (use the intake open questions that still matter), Risks and open decisions, Next 7 days, How we'll know it worked. Anything the team could not verify must be stated as such. Under 600 words.`;
       let res;
       try {
-        res = await this.llm.complete({ kind: 'synth', system, user, maxTokens: 2200, ctx: { title: task.title, outputs, intake: task.intake, decisions: task.decisions } });
+        res = await this.llm.complete({ kind: 'synth', system, user, maxTokens: 2200, ...this.toolkit(vera, task, { light: true }), ctx: { title: task.title, outputs, intake: task.intake, decisions: task.decisions } });
         if (res.simulated) await this.sleepSim(res.latencyMs / 1000, tok);
         this.account(task, res);
       } catch (e) {
@@ -483,7 +483,7 @@ export class Company extends EventEmitter {
         if (i === 0 && !entry.profile) {
           const skill = this.skills['product-marketing'];
           const res = await this.llm.complete({
-            kind: 'profile', maxTokens: 2500,
+            kind: 'profile', maxTokens: 2500, ...this.toolkit(sol, task, { light: true }),
             system: [`${COMPANY.charter}\n\nYou are ${sol.name}, ${sol.role}. ${sol.persona}`, skillPrompt(skill, 9000)],
             user: `Build the client profile for ${host} using ONLY the evidence below plus the request. Follow the structure of the product-marketing context document (overview, audience, offer and positioning, proof, conversion path, tracking, competitors if visible, brand voice). Cite page URLs. Put everything you cannot see from outside (traffic, conversion rate, lead quality, sales process, budget, ICP details) under a "Not verified" heading instead of guessing.\n\nRequest: ${task.title}\n${task.brief}\n\n# Evidence read from the site\n${snapshotToText(snap, { perPage: 2500, total: 16000 })}`,
             ctx: { title: task.title, brief: task.brief, snapshot: snap },
@@ -509,7 +509,7 @@ export class Company extends EventEmitter {
     const system = [`${COMPANY.charter}\n\nYou are ${vera.name}, ${vera.role}. ${vera.persona}\nYou are writing the intake brief that the whole team will work from. Be concrete, do not invent facts, and separate what is known from what is assumed.`];
     const user = `Request title: ${task.title}\n\nBrief:\n${task.brief || '(none)'}\n\n${this.contextText(task, 7000).replace(/^## Intake brief[\s\S]*?(?=\n## |$)/, '')}\n\nReply with JSON only:\n{"objective":"one clear sentence","goalType":"one of leadgen|outbound|seo|paid|launch|lifecycle|cro|pricing|pr|social|strategy","metric":"the one primary metric","target":"a number and unit if given, else 'Not specified'","timeframe":"...","budget":"...","audience":"who we are trying to reach","constraints":["..."],"assumptions":["each assumption we are making because information is missing"],"openQuestions":["at most 4 questions whose answers would most change the work"]}\nIf the request says a website should get more leads, the goalType is leadgen (inbound), not outbound.`;
     try {
-      const res = await this.llm.complete({ kind: 'intake', system, user, maxTokens: 1200, ctx: { title: task.title, brief: task.brief, intake: fallback } });
+      const res = await this.llm.complete({ kind: 'intake', system, user, maxTokens: 1200, ...this.toolkit(vera, task, { light: true }), ctx: { title: task.title, brief: task.brief, intake: fallback } });
       this.account(task, res); if (res.simulated) await this.sleepSim(2.5, tok);
       const j = res.simulated ? fallback : extractJson(res.text);
       if (!j || !j.objective) return fallback;
@@ -603,7 +603,7 @@ export class Company extends EventEmitter {
     this.sim.emoteFor(a, 'exclaim', 2);
     const current = a.status || 'idle';
     const res = await this.llm.complete({
-      kind: 'chat', maxTokens: 300,
+      kind: 'chat', maxTokens: 300, ...this.toolkit(a, null, { light: true }),
       system: `${COMPANY.charter}\n\nYou are ${a.name}, ${a.role} at 4EVR. ${a.persona}\nYour skills: ${a.skills.join(', ')}. You are currently: ${current}. Recent memory:\n${a.memory.slice(-5).map((m) => `- ${m.text}`).join('\n') || '- (nothing yet)'}\nReply to God in 1 to 3 sentences, in character. If asked for work, tell God to assign it as a task.`,
       user: text, ctx: { agent: a, title: text },
     });

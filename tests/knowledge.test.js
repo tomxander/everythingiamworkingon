@@ -101,3 +101,26 @@ test('it measures whether learning helps, persists, and can be switched off', ()
   assert.deepEqual(k2.relevant({ agent: 'q' }), []); assert.equal(k2.promptBlock({ agent: 'q' }).text, '');
   assert.equal(k2.remove('L1'), true); assert.ok(!k2.view().some((x) => x.id === 'L1'), 'removed lessons disappear');
 });
+
+test('learning about learning: kinds of lessons that work are ranked higher, and web study adapts to its own results', () => {
+  const k = kb();
+  const rev = []; const web = [];
+  for (let i = 0; i < 4; i++) {
+    rev.push(k.add({ scope: 'agent', agent: 'a', skill: 'cro', source: 'review', text: `Review lesson number ${i} about putting proof near the primary call to action buttons.` }));
+    web.push(k.add({ scope: 'agent', agent: 'a', skill: 'cro', source: 'web', unverified: true, text: `Web idea number ${i} about adding sticky banners and popups across all landing pages.` }));
+  }
+  assert.equal(k.sourceWeight('review'), 1, 'no evidence yet, no change'); assert.equal(k.studyFactor(), 1);
+  for (let t = 0; t < 12; t++) { k.outcome(rev.map((l) => l.id), true, `T${t}`); k.outcome(web.map((l) => l.id), t % 4 === 0, `W${t}`); }
+  const rep = Object.fromEntries(k.sourceReport().map((s) => [s.source, s]));
+  assert.ok(rep.review.rate > rep.web.rate + 30, `review ${rep.review.rate}% vs web ${rep.web.rate}%`);
+  assert.ok(k.sourceWeight('review') > 1 && k.sourceWeight('web') < 1, 'reliable sources rank higher, unreliable lower');
+  assert.equal(k.studyFactor(), 0.5, 'the web is not paying off, so agents study half as much');
+  assert.ok(k.summary().sources.some((s) => s.source === 'review') && k.summary().studyFactor === 0.5);
+  // the weight really changes which lesson is chosen when two are otherwise equally relevant
+  const k2 = kb(); k2.srcStats = { review: { uses: 20, wins: 19 }, web: { uses: 20, wins: 6 }, retro: { uses: 20, wins: 14 } };
+  const a = k2.add({ scope: 'agent', agent: 'q', skill: 'cro', source: 'web', text: 'Place the guarantee directly beside the primary signup button always.' });
+  const b = k2.add({ scope: 'agent', agent: 'q', skill: 'cro', source: 'review', text: 'Show the pricing before asking for any contact details on forms.' });
+  assert.equal(k2.relevant({ agent: 'q', skill: 'cro', limit: 1 })[0].id, b.id);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-')); k.dir = dir; k.save(); const k3 = kb(dir); k3.load(); assert.equal(k3.studyFactor(), 0.5, 'and it remembers what it learned about learning');
+  const good = kb(); good.srcStats = { review: { uses: 20, wins: 10 }, web: { uses: 20, wins: 17 } }; assert.equal(good.studyFactor(), 1.5, 'when web study works, study more');
+});
