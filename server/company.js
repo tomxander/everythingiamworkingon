@@ -59,6 +59,11 @@ export class Company extends EventEmitter {
     this.emit('broadcast', { type: 'log', entry: e });
   }
   toast(text, level = 'info') { this.emit('broadcast', { type: 'toast', text, level }); }
+  /** A problem the person watching should see on the task itself, not only in the Log tab. */
+  warn(task, text) {
+    (task.warnings ||= []).push(clip(text, 300)); if (task.warnings.length > 6) task.warnings.shift();
+    this.addLog(text, { type: 'system', taskId: task.id }); this.toast(clip(text, 140), 'warn'); this.pushTask(task);
+  }
   pushTask(task) { this.emit('broadcast', { type: 'task', task: this.publicTask(task) }); }
 
   publicTask(t) {
@@ -222,12 +227,13 @@ export class Company extends EventEmitter {
     const user = `Request title: ${task.title}\n\nBrief:\n${task.brief || '(none beyond the title)'}\n\n${this.contextText(task, 6000)}\n\nPlanning rules:\n- Tailor every workstream to the evidence above. Name the real pages, offers and gaps.\n- Nobody on the team can log in to ad accounts, analytics, a CRM or the client's CMS, or change the live site. Plan recommendations and ready-to-use assets, not actions inside those systems.\n- Match the goal type (${task.intake?.goalType || 'unknown'}): for inbound leads from a website plan conversion, SEO, copy, lead capture and nurture, paid and tracking. Use outbound or cold email only if the request asks for it.\n- Always include one workstream that makes the result measurable.${this.hiringMode === 'off' ? '' : `\n- Hiring: if the work needs domain expertise or capacity nobody on the team has (for example an industry specialist), you may hire. Add it to "hires" and assign a step to it with "agent":"hire:0" (its index in "hires"). Hire only when no current teammate can do the job well. Skills must come from the skills library${gaps.length ? `. These library skills are not owned by anyone on the team yet, so hire for them if the work needs them: ${gaps.slice(0, 12).join('; ')}` : ''}.`}\n\nReply with JSON only, in this shape:\n{"summary":"one sentence on the approach","hires":[{"role":"job title","skills":["skill-name"],"why":"why nobody here can do it","domain":"optional one word"}],"steps":[{"agent":"id","skill":"skill-name","instruction":"what exactly they must produce","deps":[],"consult":null}]}`;
     let raw = null;
     try {
-      const res = await this.llm.complete({ kind: 'plan', system, user, maxTokens: 1600, ...this.toolkit(this.agent('vera'), task, { light: true }), ctx: { title: task.title, brief: task.brief, intake: task.intake } });
+      const res = await this.llm.complete({ kind: 'plan', system, user, maxTokens: 1600, timeoutMs: Number(process.env.PLAN_TIMEOUT_S || 150) * 1000, ...this.toolkit(this.agent('vera'), task, { light: true }), ctx: { title: task.title, brief: task.brief, intake: task.intake } });
       this.account(task, res);
       if (this.llm.mode === 'mock') await this.sleepSim(res.latencyMs / 1000, tok);
       raw = extractJson(res.text);
+      if (!res.simulated && !raw) this.warn(task, 'The planner did not return a usable plan, so the workstreams come from the built-in playbook for this kind of request.');
     } catch (e) {
-      this.addLog(`Planner error (${e.message}); falling back to playbook`, { type: 'system' });
+      this.warn(task, `Planning failed (${e.message}). The workstreams come from the built-in playbook for this kind of request.`);
     }
     const plan = this.normalizePlan(raw) || planFromPlaybooks(task.title, task.brief, 7, task.intake?.playbook);
     await this.applyHires(task, plan, raw?.hires); // new people are hired before anyone starts, so the kickoff includes them
@@ -560,10 +566,16 @@ export class Company extends EventEmitter {
     const system = [`${COMPANY.charter}\n\nYou are ${vera.name}, ${vera.role}. ${vera.persona}\nYou are writing the intake brief that the whole team will work from. Be concrete, do not invent facts, and separate what is known from what is assumed.`];
     const user = `Request title: ${task.title}\n\nBrief:\n${task.brief || '(none)'}\n\n${this.contextText(task, 7000).replace(/^## Intake brief[\s\S]*?(?=\n## |$)/, '')}\n\nReply with JSON only:\n{"objective":"one clear sentence","goalType":"one of leadgen|outbound|seo|paid|launch|lifecycle|cro|pricing|pr|social|strategy","metric":"the one primary metric","target":"a number and unit if given, else 'Not specified'","timeframe":"...","budget":"...","audience":"who we are trying to reach","constraints":["..."],"assumptions":["each assumption we are making because information is missing"],"openQuestions":["at most 4 questions whose answers would most change the work"]}\nIf the request says a website should get more leads, the goalType is leadgen (inbound), not outbound.`;
     try {
-      const res = await this.llm.complete({ kind: 'intake', system, user, maxTokens: 1200, ...this.toolkit(vera, task, { light: true }), ctx: { title: task.title, brief: task.brief, intake: fallback } });
+      const deadline = Number(process.env.INTAKE_TIMEOUT_S || 120) * 1000;
+      let res = await this.llm.complete({ kind: 'intake', system, user, maxTokens: 1200, timeoutMs: deadline, ...this.toolkit(vera, task, { light: true }), ctx: { title: task.title, brief: task.brief, intake: fallback } });
       this.account(task, res); if (res.simulated) await this.sleepSim(2.5, tok);
-      const j = res.simulated ? fallback : extractJson(res.text);
-      if (!j || !j.objective) return fallback;
+      let j = res.simulated ? fallback : extractJson(res.text);
+      if (!res.simulated && (!j || !j.objective)) { // the model answered in prose (often after searching): ask once more, plainly, with no tools
+        this.addLog('The intake answer was not usable JSON; asking again without tools', { type: 'system', taskId: task.id });
+        res = await this.llm.complete({ kind: 'intake', system, user: `${user}\n\nReply with the JSON object only. No prose, no markdown fences.`, maxTokens: 1200, timeoutMs: deadline, ctx: { title: task.title, brief: task.brief, intake: fallback } });
+        this.account(task, res); j = extractJson(res.text);
+      }
+      if (!j || !j.objective) { this.warn(task, 'Vera could not produce a usable intake brief for this request, so the brief below is a generic fallback. The workstreams are still planned from the request itself.'); return fallback; }
       const goals = ['leadgen', 'outbound', 'seo', 'paid', 'launch', 'lifecycle', 'cro', 'pricing', 'pr', 'social', 'strategy'];
       const goalType = goals.includes(j.goalType) ? j.goalType : fallback.goalType;
       const toPlaybook = { outbound: 'sales' };
@@ -574,7 +586,7 @@ export class Company extends EventEmitter {
         constraints: arr(j.constraints, []), assumptions: arr(j.assumptions, fallback.assumptions), openQuestions: arr(j.openQuestions, fallback.openQuestions).slice(0, 4), site: fallback.site,
       };
     } catch (e) {
-      this.addLog(`Intake call failed (${e.message}); used the heuristic intake`, { type: 'system' });
+      this.warn(task, `The intake call failed (${e.message}). The brief below is a generic fallback, not tailored to this request.`);
       return fallback;
     }
   }
