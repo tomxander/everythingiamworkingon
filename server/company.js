@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { COMPANY, DEPT_META } from './roster.js';
-import { bestSkill, skillPrompt } from './skills.js';
+import { bestSkill, skillPrompt, rankSkills } from './skills.js';
 import { extractJson } from './llm.js';
 import { planFromPlaybooks, heuristicIntake } from './mock.js';
 import { crawlSite, extractUrls, siteFindings, snapshotToText, TOOL_DEFS, makeToolHandler, webSearch } from './tools.js';
@@ -266,7 +266,7 @@ export class Company extends EventEmitter {
       this.addComms({ from: a.id, to: 'all', text: `Starting ${sub.skill} for "${clip(task.title, 60)}".`, kind: 'task', taskId: task.id });
 
       // a planned consult, or by default a word with whoever produced the work you are building on
-      const consultWith = sub.consult || (this.collab === 'full' && sub.deps.length ? task.subtasks[sub.deps[0]]?.agent : null);
+      const consultWith = sub.consult || (this.collab === 'full' && sub.deps.length ? task.subtasks[sub.deps[0]]?.agent : null) || this.pickExpert(a, task, sub)?.id;
       if (consultWith && consultWith !== a.id) { try { await this.consult(a, this.agent(consultWith), task, sub, tok); } catch (e) { this.addLog(`Consult skipped (${e.message})`, { type: 'system', agent: a.id }); a.pose = 'stand'; } }
 
       await sim.goTo(a, a.desk.seat, { pose: 'sit', tok }); a.pose = 'type';
@@ -282,7 +282,7 @@ export class Company extends EventEmitter {
       const kbb = this.kbBlock(a, task, skill, sub.instruction); sub.lessonIds = kbb.ids; sub.hadLessons = kbb.ids.length > 0;
       const system = this.workSystem(a, task, skill, kbb.text);
       const thread = this.threadText(task, a.id);
-      const user = `## Client request\nTitle: ${task.title}\n${task.brief || '(no further brief)'}\n\n## Your assignment (skill: ${sub.skill})\n${sub.instruction}\n\n## Upstream work from teammates\n${prior.length ? prior.map((p) => `### ${p.agentName} (${p.skill})\n${clip(p.text, 1800)}`).join('\n\n') : '(none; you are first in the chain)'}${thread ? `\n\n## Team discussion so far (read it, and answer anything addressed to you)\n${thread}` : ''}\n\n## Rules for this deliverable\n- Ground every statement about the client in the client context above and cite the page URL. Label anything you could not verify as "Not verified".\n- You cannot log in to or change the client's systems. Give recommendations and ready-to-use assets (copy, specs, configurations) and say who should apply them.\n- Do not ask questions. State assumptions and proceed.\n\n## Deliverable format\nMarkdown. Start with a "# " title. Include: Assumptions (bullets), the work product itself, ready to use, then "Next actions" and "How we'll know it worked". About 500 to 900 words unless the work needs more.`;
+      const user = `## Client request\nTitle: ${task.title}\n${task.brief || '(no further brief)'}\n\n## Who owns what on this task (stay in your lane; build on theirs, do not repeat it)\n${this.planBoard(task, sub)}\n\n## Your assignment (skill: ${sub.skill})\n${sub.instruction}\n\n## Upstream work from teammates\n${prior.length ? prior.map((p) => `### ${p.agentName} (${p.skill})\n${clip(p.text, 1800)}`).join('\n\n') : '(none; you are first in the chain)'}${thread ? `\n\n## Team discussion so far (read it, and answer anything addressed to you)\n${thread}` : ''}\n\n## Rules for this deliverable\n- Ground every statement about the client in the client context above and cite the page URL. Label anything you could not verify as "Not verified".\n- You cannot log in to or change the client's systems. Give recommendations and ready-to-use assets (copy, specs, configurations) and say who should apply them.\n- Do not ask questions. State assumptions and proceed.\n\n## Deliverable format\nMarkdown. Start with a "# " title. Include: Assumptions (bullets), the work product itself, ready to use, then "Next actions" and "How we'll know it worked". About 500 to 900 words unless the work needs more.`;
 
       this.guardBudget();
       const web = this.llm.mode === 'mock' ? await this.mockWebResearch(task, a, skill) : null; // simulated mode still really searches the web
@@ -311,6 +311,28 @@ export class Company extends EventEmitter {
     });
     // peer review (does not hold the author)
     await this.review(task, sub);
+  }
+
+  planBoard(task, sub) {
+    return task.subtasks.map((x) => `- ${this.agent(x.agent)?.short || x.agent}: ${x.skill} (${x.status})${x.id === sub.id ? ' <- you' : ''}${x.deps.length ? `, builds on ${x.deps.map((d) => this.agent(task.subtasks[d]?.agent)?.short).filter(Boolean).join(', ')}` : ''}`).join('\n');
+  }
+
+  /**
+   * A workstream with nobody upstream still gets outside input: the best-fit teammate who is not on this task
+   * (so specialists such as research, offers or content are not left out), if they are free and the task has budget for it.
+   */
+  pickExpert(a, task, sub) {
+    if (this.collab !== 'full' || (task.expertConsults || 0) >= 3) return null;
+    const onTask = new Set(task.subtasks.map((s) => s.agent)); const text = `${sub.skill.replace(/-/g, ' ')} ${sub.instruction} ${task.title}`;
+    let best = null;
+    for (const c of this.sim.agents.values()) {
+      if (c.id === a.id || onTask.has(c.id) || c.dept === 'people' || c.busy || this.load_of(c.id) >= 3) continue;
+      const own = Object.fromEntries(c.skills.filter((k) => this.skills[k]).map((k) => [k, this.skills[k]]));
+      const top = rankSkills(own, text, 1, this.skills)[0]; if (!top || top.score < 4) continue;
+      if (!best || top.score > best.score) best = { agent: c, score: top.score };
+    }
+    if (best) task.expertConsults = (task.expertConsults || 0) + 1;
+    return best?.agent || null;
   }
 
   async consult(a, b, task, sub, tok) {

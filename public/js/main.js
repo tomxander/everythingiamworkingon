@@ -172,12 +172,29 @@ function updateBadges() {
 $('#tabs').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return; setTab(b.dataset.tab);
 });
+function moveTabIndicator() {
+  const on = $('#tabs button.on'), ind = $('#tab-ind'); if (!on || !ind) return;
+  ind.style.width = `${on.offsetWidth}px`; ind.style.transform = `translateX(${on.offsetLeft - 4}px)`;
+}
+window.addEventListener('resize', moveTabIndicator); setTimeout(moveTabIndicator, 60); document.fonts?.ready.then(moveTabIndicator);
+/** Count a number up to its value when a panel opens (skipped for reduced motion). */
+function countUp(root) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  $$('.tile .v', root).forEach((el) => {
+    const node = [...el.childNodes].find((n) => n.nodeType === 3 && /^\s*[\d,.]+\s*$/.test(n.textContent)); if (!node) return;
+    const txt = node.textContent.trim(); const to = parseFloat(txt.replace(/,/g, '')); if (!isFinite(to) || to === 0) return;
+    const dec = (txt.split('.')[1] || '').length; const t0 = performance.now();
+    const step = (t) => { const k = Math.min(1, (t - t0) / 700); const e = 1 - Math.pow(1 - k, 3); node.textContent = (to * e).toFixed(dec); if (k < 1) requestAnimationFrame(step); else node.textContent = txt; };
+    requestAnimationFrame(step);
+  });
+}
 function setTab(tab) {
-  st.tab = tab;
-  $$('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+  const changed = st.tab !== tab; st.tab = tab;
+  $$('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab)); moveTabIndicator();
   $$('.panel').forEach((p) => p.classList.toggle('on', p.id === `p-${tab}`));
   if (tab === 'output') { st.unreadOutput = 0; updateBadges(); }
   if (tab === 'team') renderTeam(); if (tab === 'brain') renderBrain(); if (tab === 'metrics') renderMetrics(); if (tab === 'log') renderLog(); if (tab === 'comms') { renderComms(); }
+  if (changed && (tab === 'metrics' || tab === 'brain')) countUp($(`#p-${tab}`));
 }
 
 // ------------------------------------------------------------ tasks panel
@@ -185,8 +202,8 @@ let tasksQueued = false;
 function renderTasksSoon() { if (tasksQueued) return; tasksQueued = true; setTimeout(() => { tasksQueued = false; renderTasks(); }, 120); }
 
 function avatar(id, extra = '') {
-  const a = st.agents[id]; if (id === 'god') return `<span class="av" style="background:var(--gold)">☼</span>`;
-  if (!a) return `<span class="av" style="background:#555">?</span>`;
+  const a = st.agents[id]; if (id === 'god') return `<span class="av" style="background:var(--navy);color:#fff">☼</span>`;
+  if (!a) return `<span class="av" style="background:#c9d5d9">?</span>`;
   const working = st.live[id]?.busy ? 'working' : '';
   return `<span class="av ${working} ${extra}" style="background:${a.color}" title="${esc(a.name)}">${esc(a.short.slice(0, 2).toUpperCase())}</span>`;
 }

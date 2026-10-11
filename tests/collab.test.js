@@ -134,3 +134,16 @@ test('lean: fewer model calls than full, but still kicks off, hands off, aligns 
   assert.ok(!(lean.t.meetings || []).some((m) => m.type === 'retro'), 'but there is no retro meeting');
   assert.ok(lean.t.retro && lean.w.company.kb.view().length > 0, 'while the lessons are still recorded');
 });
+
+test('outside experts are pulled in: relevant teammates who are not on the task get consulted, capped per task, never HR', async () => {
+  const w = world();
+  const t = w.company.submitTask({ title: 'Get acme.test more leads: 40 enquiries a month', brief: 'B2B. Budget $5k.' });
+  assert.ok(await finish(w, t)); assert.equal(t.status, 'done', t.error);
+  const onTask = new Set(t.subtasks.map((s) => s.agent));
+  const outsiders = (t.thread || []).filter((m) => m.kind === 'consult' && m.to && !onTask.has(m.to) && m.to !== 'all');
+  assert.ok(outsiders.length >= 1, 'someone off the task was asked for input');
+  assert.ok(t.expertConsults >= 1 && t.expertConsults <= 3, `expert consults ${t.expertConsults}`);
+  assert.ok(!(t.thread || []).some((m) => ['nia', 'tomas'].includes(m.to) && m.kind === 'consult'), 'HR is not pulled into marketing work');
+  const lean = world({ collab: 'lean' }); const t2 = lean.company.submitTask({ title: 'Get acme.test more leads: 40 enquiries a month', brief: 'B2B.' });
+  assert.ok(await finish(lean, t2)); assert.ok(!t2.expertConsults, 'lean mode does not add expert consults');
+});

@@ -31,7 +31,7 @@ export class Renderer {
   buildStatic() {
     const { W, H, floor, wall, furniture, rooms } = this.map;
     const { c, ctx } = makeCanvas(W * T, H * T);
-    rect(ctx, 0, 0, W * T, H * T, '#0b0e1a');
+    rect(ctx, 0, 0, W * T, H * T, '#17364b');
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       if (floor[y][x] && !wall[y][x]) drawFloorTile(ctx, floor[y][x], x, y);
     }
@@ -102,7 +102,7 @@ export class Renderer {
     const ctx = this.ctx; const t = ts / 1000; const { cam, dpr } = this;
     if (this.follow && snap) { const a = snap.agents.find((x) => x.id === this.follow); if (a) { this.cam.x += (this.vw / 2 - a.x * T * cam.zoom - cam.x) * 0.08; this.cam.y += (this.vh / 2 - a.y * T * cam.zoom - cam.y) * 0.08; } }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#070912'; ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height); // the glass stage shows through around the building
     ctx.setTransform(dpr * cam.zoom, 0, 0, dpr * cam.zoom, dpr * cam.x, dpr * cam.y);
     ctx.imageSmoothingEnabled = cam.zoom * dpr < S * 0.95; ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(this.bg, 0, 0, this.map.W * T, this.map.H * T);
@@ -243,9 +243,9 @@ export class Renderer {
       const sit = (a.pose === 'type' || a.pose === 'sit') ? 0.12 : 0;
       const topY = p.y + sit * T * z - 4 * z;
       if (showAll || this.hover === a.id || this.selected === a.id) {
-        const name = info.short; ctx.font = `600 ${clamp(9 * z * 0.72, 9, 13)}px Inter, system-ui, sans-serif`;
+        const name = info.short; ctx.font = `600 ${clamp(9 * z * 0.72, 9, 13)}px Urbanist, system-ui, sans-serif`;
         const w = ctx.measureText(name).width + 12; const x = p.x - w / 2, y = topY - 14 - (a.emote ? 0 : 0);
-        ctx.fillStyle = 'rgba(8,10,22,0.78)'; roundRect(ctx, x, y - 10, w, 14, 7); ctx.fill();
+        ctx.fillStyle = 'rgba(22,49,68,0.9)'; roundRect(ctx, x, y - 10, w, 14, 7); ctx.fill();
         ctx.fillStyle = info.color; ctx.beginPath(); ctx.arc(x + 6, y - 3, 2.6, 0, 7); ctx.fill();
         ctx.fillStyle = '#eef1ff'; ctx.textAlign = 'left'; ctx.fillText(name, x + 11, y + 0.5);
         if (a.busy) { ctx.fillStyle = '#5ec28a'; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(t * 6); ctx.beginPath(); ctx.arc(x + w - 4, y - 3, 2, 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
@@ -263,7 +263,7 @@ export class Renderer {
   }
 
   drawBubble(ctx, b, placed) {
-    const z = this.cam.zoom; const fs = clamp(5.2 * z, 10.5, 15); ctx.font = `500 ${fs}px Inter, system-ui, sans-serif`;
+    const z = this.cam.zoom; const fs = clamp(5.2 * z, 10.5, 15); ctx.font = `500 ${fs}px Urbanist, system-ui, sans-serif`;
     const maxW = clamp(46 * z, 150, 260);
     const lines = wrap(ctx, b.text, maxW);
     const shown = lines.slice(0, 5); if (lines.length > 5) shown[4] = shown[4].replace(/.{0,3}$/, '…');

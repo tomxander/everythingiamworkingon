@@ -1,29 +1,30 @@
+<div align="center">
+
 # 4EVR HQ
 
-A multi-agent marketing operations platform. A team of specialist AI agents, organised into teams with leads and coordinated by a CMO agent, plans, executes, reviews and reports on marketing work. Agents have internet access, can hire the right specialists when the work needs them, and learn from every review and retrospective. A live operations view shows who is doing what, what they are saying to each other, what they have learned, and what it costs.
+**A marketing agency run by a team of AI agents, with a live control room.**
 
-Agent expertise comes from the open-source [marketingskills](https://github.com/coreyhaines31/marketingskills) library (50 skills, MIT), vendored in `vendor/marketingskills` and kept current from the upstream repository. Each agent loads the full playbooks for the skills it owns into its system prompt, and every new specialist is built from playbooks in that library.
+![Node](https://img.shields.io/badge/node-%E2%89%A520-163144?style=flat-square&labelColor=1B405B)
+![Tests](https://img.shields.io/badge/tests-102%20passing-163144?style=flat-square&labelColor=1B405B)
+![Modes](https://img.shields.io/badge/modes-simulated%20%C2%B7%20live-163144?style=flat-square&labelColor=1B405B)
+
+<img src="docs/screenshots/office.png" alt="4EVR HQ: the office floor plan beside the task panel" width="860">
+
+</div>
+
+Specialist agents, organised into teams with leads and coordinated by a CMO agent, plan, execute, review and report on marketing work. They have internet access, ask each other for input, hire the specialists a job needs, and learn from every review and retrospective. A People & Talent team looks after hiring, onboarding, reviews and workforce planning. The interface shows who is doing what, what they are saying to each other, what they have learned, and what it costs.
+
+Expertise comes from two open-source skill libraries, both vendored and kept current from their upstream repositories: [marketingskills](https://github.com/coreyhaines31/marketingskills) (marketing playbooks) and [hr-skills](https://github.com/tuanductran/hr-skills) (people playbooks). Each agent loads the full playbooks it owns, and every new specialist is built from them.
 
 Created by [@tomxander](https://github.com/tomxander), built with Claude Code.
 
-## Contents
+<div align="center">
 
-- [Quick start](#quick-start)
-- [Capabilities](#capabilities)
-- [How work flows](#how-work-flows)
-- [Teamwork](#teamwork)
-- [Internet access](#internet-access)
-- [Hiring](#hiring)
-- [People & Talent](#people--talent)
-- [Learning](#learning)
-- [Execution modes](#execution-modes)
-- [Configuration](#configuration)
-- [Agent roster](#agent-roster)
-- [Architecture](#architecture)
-- [Extending](#extending)
-- [Security](#security)
-- [Testing](#testing)
-- [Licence and credits](#licence-and-credits)
+| | | | |
+|:--:|:--:|:--:|:--:|
+| **16** agents | **7** teams | **196** playbooks | **2** modes |
+
+</div>
 
 ## Quick start
 
@@ -43,6 +44,42 @@ ANTHROPIC_API_KEY=sk-ant-... npm start
 ```
 
 The key can also be entered in the Settings panel. It is held in server memory only and never written to disk.
+
+## Contents
+
+- [Quick start](#quick-start)
+- [Interface](#interface)
+- [Capabilities](#capabilities)
+- [How work flows](#how-work-flows)
+- [Teamwork](#teamwork)
+- [Internet access](#internet-access)
+- [Hiring](#hiring)
+- [People & Talent](#people--talent)
+- [Learning](#learning)
+- [Execution modes](#execution-modes)
+- [Configuration](#configuration)
+- [Agent roster](#agent-roster)
+- [Architecture](#architecture)
+- [Extending](#extending)
+- [Security](#security)
+- [Testing](#testing)
+- [Licence and credits](#licence-and-credits)
+
+## Interface
+
+<div align="center">
+<img src="docs/screenshots/comms.png" alt="The Comms tab showing agents consulting each other during a task" width="780">
+</div>
+
+A light, frosted-glass control room: the office on the left, the operating panels on the right, and the God console along the bottom.
+
+- **Office.** Agents walk between workstations, the council table, the lounge and the People & Talent room as they work, consult and review. Click anyone to inspect their skills, memory, lessons, job description and reviews, or to talk to them.
+- **Panels.** Tasks (intake brief, meetings, decisions, hires), Comms (every message, filterable), Team (org chart, People & Talent), Brain (what the company has learned), Output (deliverables and workforce reports), Metrics and Log.
+- **Console.** Assign a task to the CMO or to one person, start from a template, announce to the office, call a coffee round or a town hall.
+- **Motion.** Panels, cards and toasts ease in, the tab selector slides, progress bars animate, metric tiles count up, and everything respects the system reduced-motion setting.
+- **Design tokens.** Deep blue `#1B405B`, navy `#163144`, mint `#DFF3EB`, white; set in Urbanist. All colours and the glass effect are variables at the top of `public/styles.css`.
+
+![](https://img.shields.io/badge/-%231B405B-1B405B?style=flat-square) ![](https://img.shields.io/badge/-%23163144-163144?style=flat-square) ![](https://img.shields.io/badge/-%23DFF3EB-DFF3EB?style=flat-square) ![](https://img.shields.io/badge/-%23FFFFFF-FFFFFF?style=flat-square)
 
 ## Capabilities
 
@@ -78,8 +115,10 @@ Agents work asynchronously and do not ask clarifying questions. They state assum
 
 ## Teamwork
 
-- **Teams and leads.** Six teams (Strategy, SEO & Content, Creative, Growth & Data, Lifecycle & Paid, Revenue & Reach), each with a lead who reports to the CMO. Members report to their lead. The org chart is in the Team tab.
+- **Teams and leads.** Six marketing teams (Strategy, SEO & Content, Creative, Growth & Data, Lifecycle & Paid, Revenue & Reach), each with a lead who reports to the CMO, plus People & Talent, led by Nia, who reports to you. Members report to their lead. The org chart is in the Team tab.
 - **One channel per task.** Kickoff turns, handoffs, consults, reviews and decisions go into a task channel that every later prompt includes, so agents act on what teammates actually said. Small talk never enters it.
+- **Outside experts.** A workstream with nobody upstream still gets input: the best-fit teammate who is not on the task (research, offers, content and so on) is asked a specific question before the work starts, up to three per task, only when they are free, never from People & Talent, and only in `full` mode.
+- **Who owns what.** Every agent's prompt includes a plan board: each workstream, its owner and status, and who builds on whom, so people stay in their lane and build on each other's work instead of repeating it.
 - **Asking colleagues.** In live mode an agent can call `ask_teammate` mid-work and get an answer from that teammate's own persona and context. By default a downstream owner also has a word with whoever produced the work they build on.
 - **Alignment.** Conflicts are found by checking real deliverables against each other. Invented or malformed conflicts (for example naming someone who is not on the task) are discarded.
 - **Escalation.** A failed workstream goes to the lead, is retried once with a tighter scope, and otherwise is cut with a note in the summary. The task still completes.
@@ -228,7 +267,8 @@ server/
   sim.js       Agent state, movement, timing
   life.js      Idle behaviour between tasks
   map.js       Floor plan, walkability grid, A* pathfinding
-public/        Browser client: canvas renderer and interface (no build step, no image assets)
+public/        Browser client: canvas renderer and glass interface (no build step, no image assets)
+docs/          Screenshots used in this README
 vendor/        marketingskills and hr-skills (MIT)
 tests/         node:test suites
 ```
@@ -256,7 +296,7 @@ The server is authoritative. It streams state to the browser over WebSocket at 1
 npm test
 ```
 
-One hundred and one tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (including private-address and redirect protection and untrusted-content fencing), site crawling, the org chart, kickoff, handoffs, alignment, escalation and recovery, hiring policy and approval, the knowledge base (safety filter, retrieval, promotion and retirement, consolidation, learning about learning), the learning loop, reuse of hired specialists, upstream skill sync (hardened archive reading, validation, overlay, rollback, approval) and hiring from newly added playbooks, People & Talent (requisitions, rating rule, reports, releases needing approval), the real hr-skills archive, work-aware chat, lean versus full conversation cost, and the live path against scripted fakes of the Messages API: tool use, asking teammates, hiring mid-task, saving lessons, reflection, retrospectives, study, prompt-injection resistance, truncation recovery, revisions and timeouts.
+One hundred and two tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (including private-address and redirect protection and untrusted-content fencing), site crawling, the org chart, kickoff, handoffs, alignment, escalation and recovery, hiring policy and approval, the knowledge base (safety filter, retrieval, promotion and retirement, consolidation, learning about learning), the learning loop, reuse of hired specialists, upstream skill sync (hardened archive reading, validation, overlay, rollback, approval) and hiring from newly added playbooks, People & Talent (requisitions, rating rule, reports, releases needing approval), the real hr-skills archive, outside-expert consults, work-aware chat, lean versus full conversation cost, and the live path against scripted fakes of the Messages API: tool use, asking teammates, hiring mid-task, saving lessons, reflection, retrospectives, study, prompt-injection resistance, truncation recovery, revisions and timeouts.
 
 ## Licence and credits
 
