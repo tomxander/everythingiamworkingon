@@ -12,7 +12,7 @@ const ANNEX_SLOTS = 16;
 
 export const hiring = {
   publicAgent(a) {
-    return { id: a.id, short: a.short, name: a.name, role: a.role, dept: a.dept, room: a.room, color: a.color, emoji: a.emoji, skills: a.skills, persona: a.persona, quirks: a.quirks, look: a.look, lead: !!a.lead, reportsTo: a.reportsTo || null, hired: !!a.hired, domains: a.domains || [], joined: a.joined || null, why: a.why || null, jd: a.jd || null, onboarding: a.onboarding || null };
+    return { id: a.id, short: a.short, name: a.name, role: a.role, dept: a.dept, room: a.room, color: a.color, emoji: a.emoji, skills: a.skills, persona: a.persona, quirks: a.quirks, look: a.look, lead: !!a.lead, reportsTo: a.reportsTo || null, hired: !!a.hired, domains: a.domains || [], joined: a.joined || null, why: a.why || null, jd: a.jd || null, onboarding: a.onboarding || null, model: this.agentModel(a.id) };
   },
 
   hiringStatus() {

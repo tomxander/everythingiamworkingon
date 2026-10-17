@@ -449,3 +449,11 @@ select.minisel { background-position: right 10px center; padding-right: 28px; }
 .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .tile .v small { display: block; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile { justify-content: flex-start; } /* numbers line up across a row, with or without a caption */
+/* Models per person: name and role on the left, the picker on the right, every row the same height */
+.mlist { display: grid; gap: 6px; margin-top: 8px; }
+.mrow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 10px; align-items: center; padding: 6px 8px 6px 12px; border-radius: 14px; background: rgba(255,255,255,.45); border: 1px solid rgba(255,255,255,.7); }
+.mwho { min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.mwho b { font-size: 13px; color: var(--navy); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mwho span { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mrow select.field, .insp ~ .row select.field { height: 36px; padding: 0 32px 0 12px; font-size: 12.5px; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23163144' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; text-overflow: ellipsis; }
+@media (max-width: 520px) { .mrow { grid-template-columns: 1fr; } }

@@ -32,10 +32,10 @@ export function validate(body) {
 
 /** reply(body) -> final text for a conversation that is done calling tools. toolInput(name) -> input for a tool call. */
 export async function strictApi({ reply, toolInput = () => ({}), toolRounds = 2 }) {
-  const state = { requests: 0, violations: [], toolCalls: 0 };
+  const state = { requests: 0, violations: [], toolCalls: 0, calls: [] };
   const server = http.createServer((req, res) => {
     let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => {
-      const body = JSON.parse(b || '{}'); state.requests++; res.setHeader('content-type', 'application/json');
+      const body = JSON.parse(b || '{}'); state.requests++; state.calls.push({ model: body.model, system: JSON.stringify(body.system || '') }); res.setHeader('content-type', 'application/json');
       const errs = validate(body);
       if (errs.length) { state.violations.push(...errs); res.statusCode = 400; return res.end(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: errs[0] } })); }
       const thinking = { type: 'thinking', thinking: 'Considering the request.', signature: `sig-${state.requests}` };

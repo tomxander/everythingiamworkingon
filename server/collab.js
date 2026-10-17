@@ -220,7 +220,7 @@ export const collab = {
             said.push(r.text); me.dir = 'down'; await this.speak(task, m, me, r.text, { kind: 'question', to: other.id, tok });
           }
           const d = await this.llm.complete({
-            kind: 'decision', maxTokens: 260,
+            kind: 'decision', maxTokens: 260, agent: vera.id,
             system: this.personaSystem(vera, 'You are the CMO making the call. State the decision, who owns it and by when, in 2 to 3 sentences. Pick one path, do not hedge.'),
             user: `The conflict: ${c.issue}\n${said.length ? `${A.short}: ${said[0]}\n${B.short}: ${said[1]}\n` : `${A.short} and ${B.short} have not been asked for their positions: decide from the deliverables.\n`}\nDecide.`, ctx: { rule: c.rule, title: task.title },
           });
@@ -269,7 +269,7 @@ export const collab = {
       if (this.hiringMode !== 'off') { tools.push(HIRE_TOOL); extra.request_hire = (inp) => this.toolHire(a, task, inp); }
       if (this.kb.mode === 'active') { tools.push(SAVE_TOOL, RECALL_TOOL); extra.save_lesson = (inp) => this.toolSaveLesson(a, task, inp, state); extra.recall_lessons = (inp) => this.toolRecall(a, task, inp); }
     }
-    return { tools, onTool: makeToolHandler({ skill, log, extra }), maxTurns: light ? 2 : 5 };
+    return { agent: a.id, tools, onTool: makeToolHandler({ skill, log, extra }), maxTurns: light ? 2 : 5 }; // agent: so the call uses this person's model
   },
 
   async askTeammate(a, task, { to, question }, state) {

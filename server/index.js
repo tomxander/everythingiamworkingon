@@ -150,6 +150,7 @@ wss.on('connection', (ws) => {
         case 'answerRequest': company.answerRequest(String(m.id), { text: String(m.text || ''), files: m.files, decline: !!m.decline }); break;
         case 'applyAnswers': company.applyAnswers(String(m.taskId)).then((r) => send(ws, { type: 'toast', text: `Applied ${r.applied} answer(s) to ${r.updated} deliverable(s).${r.unmatched ? ` ${r.unmatched} had nothing finished to update; the team will use them in later work.` : ''}`, level: 'good' })).catch((e) => send(ws, { type: 'toast', text: e.message, level: 'warn' })); break;
         case 'setModel': llm.setModel(String(m.model || '').slice(0, 80)); savePrefs(); broadcast({ type: 'settings', settings: settings() }); if (llm.mode !== 'mock') testConnection(ws); break;
+        case 'setAgentModel': company.setAgentModel(String(m.id || ''), m.model ? String(m.model).slice(0, 80) : null); break;
         case 'listModels': await llm.listModels({ force: !!m.force }); send(ws, { type: 'settings', settings: settings() }); break;
         case 'setCollab': company.collab = ['full', 'lean', 'off'].includes(m.value) ? m.value : company.collab; broadcast({ type: 'settings', settings: settings() }); break;
         case 'setHiring': company.hiringMode = ['auto', 'ask', 'off'].includes(m.value) ? m.value : company.hiringMode; broadcast({ type: 'settings', settings: settings() }); break;

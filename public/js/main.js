@@ -47,6 +47,7 @@ function handle(m) {
     case 'skills_pending': if (m.source && st.settings) st.settings.skills = m.source; refreshSettings(); break;
     case 'kb': st.kb = m.kb; if (st.tab === 'brain') renderBrain(); updateBadges(); break;
     case 'agent_added': { const a = m.agent; st.agents[a.id] = a; if (!st.order.includes(a.id)) st.order.push(a.id); renderer?.addAgent(a); st.hiring = m.hiring; if (st.tab === 'team') renderTeam(); break; }
+    case 'agent_model': { const a = st.agents[m.id]; if (a) a.model = m.model; refreshModelPickers(m.id); break; }
     case 'agent_removed': { delete st.agents[m.id]; st.order = st.order.filter((x) => x !== m.id); delete st.live[m.id]; renderer?.removeAgent(m.id); st.hiring = m.hiring; if (st.selected === m.id) st.selected = null; if (st.tab === 'team') renderTeam(); break; }
     case 'request': { const i = st.requests.findIndex((r) => r.id === m.request.id); if (i >= 0) st.requests[i] = m.request; else st.requests.unshift(m.request); updateBadges(); if (st.tab === 'inbox' && document.activeElement?.tagName !== 'TEXTAREA') renderInbox(); break; }
     case 'requests': st.requests = m.requests; updateBadges(); if (st.tab === 'inbox') renderInbox(); break;
@@ -162,7 +163,7 @@ function updateTop() {
   const s = st.settings, stt = st.stats; if (!s) return;
   const live = s.mode === 'live' || s.mode === 'cli';
   $('#mode-chip').classList.toggle('live', live);
-  $('#mode-label').textContent = s.mode === 'cli' ? `Claude account, ${modelName(s)}` : live ? `API key, ${modelName(s)}` : 'Simulated';
+  $('#mode-label').textContent = s.mode === 'cli' ? 'Claude account' : live ? 'API key' : 'Simulated'; // each person has their own model, so none is named here
   const t = stt?.llm?.totals;
   // simulated runs show what a live run would have cost; live runs show real spend against the cap
   if (t) { $('#tok').textContent = fmtNum(t.inputTokens + t.outputTokens); $('#cost').textContent = live ? fmtMoney(t.spent ?? t.cost) : `~${fmtMoney(t.cost)}`; }
@@ -530,6 +531,22 @@ function openSkill(s) {
     <div class="notice">${esc(s.description)}</div><div class="md">${md(s.body)}</div>`, 'skill', true);
 }
 
+// ------------------------------------------------------------ models per person
+const shortModel = (id) => (st.settings?.models || []).find((x) => x.id === id)?.name?.replace(/^Claude /, '') || id;
+function modelOptions(m) {
+  const money = (v) => (v == null ? '' : v < 1 ? `$${v.toFixed(2)}` : `$${v}`);
+  const models = (st.settings?.models || []).filter((x) => x.tier !== 'older' || x.id === m.choice);
+  return `<option value="" ${m.choice ? '' : 'selected'}>Suggested: ${esc(shortModel(m.suggested))}</option>${models.map((x) => `<option value="${esc(x.id)}" ${x.id === m.choice ? 'selected' : ''}>${esc(x.name.replace(/^Claude /, ''))}${x.in != null ? ` (${money(x.in)} in, ${money(x.out)} out per million tokens)` : ''}</option>`).join('')}`;
+}
+/** Keep any open picker for this person in step with the server. */
+function refreshModelPickers(id) {
+  const m = st.agents[id]?.model; if (!m) return;
+  $$(`[data-agent-model="${id}"]`).forEach((sel) => { sel.innerHTML = modelOptions(m); sel.disabled = false; });
+}
+function bindModelPickers(root) {
+  $$('[data-agent-model]', root).forEach((sel) => (sel.onchange = () => { sel.disabled = true; send({ type: 'setAgentModel', id: sel.dataset.agentModel, model: sel.value || null }); }));
+}
+
 function openInspector(id) {
   const a = st.agents[id];
   openModal(`<button class="btn close" aria-label="Close">${icon('close')}</button><div class="insp"><canvas id="insp-av" width="48" height="72"></canvas><div>
@@ -537,10 +554,12 @@ function openInspector(id) {
     <p>${esc(a.persona)}</p><div id="insp-live" class="notice"></div>
     <div class="row"><button class="btn" id="i-follow">Follow</button><button class="btn" id="i-bless">${icon('spark')}Bless</button><button class="btn" id="i-smite">${icon('bolt')}Smite, lightly</button><button class="btn primary" id="i-task">Assign task</button>${a.hired ? '<button class="btn" id="i-fire">Let go</button>' : ''}</div></div></div>
     <h3 class="sect" style="margin-top:18px">Skills</h3><div class="chips">${a.skills.map((k) => `<span class="skill" data-skill="${k}">${k}</span>`).join('')}</div>
+    ${a.model ? `<h3 class="sect">Model</h3><div class="row"><select class="field" style="flex:1" data-agent-model="${a.id}" aria-label="Model for ${esc(a.short)}">${modelOptions(a.model)}</select></div><p class="help">${esc(a.model.why)}${/haiku/.test(a.model.current) ? '' : ' Quick replies in meetings and chat use Haiku 5.5 to save cost.'}</p>` : ''}
     <h3 class="sect">Talk to ${esc(a.short)}</h3><form class="row" id="i-chat"><input class="field" style="flex:1" id="i-chat-text" placeholder="Say something to ${esc(a.short)}…" maxlength="500"/><button class="btn">Send</button></form><div id="i-reply" class="muted" style="margin-top:6px"></div>
     ${a.jd ? `<h3 class="sect">Job description</h3><div class="md">${md(a.jd)}</div><h3 class="sect">30/60/90 plan</h3>${(a.onboarding || []).map((p) => `<div class="srcline"><b>${esc(p.phase)}</b>: ${esc(p.goals.join('; '))}</div>`).join('')}` : ''}
     ${(st.hr?.reviews || []).filter((r) => r.agent === a.id).slice(0, 2).map((r) => `<h3 class="sect">Performance review <span class="pill">${esc(r.rating)}</span></h3><div class="muted">${esc(r.narrative)}</div><div class="muted" style="font-size:11px">${esc(r.factLines.join(' · '))}</div>`).join('')}
     <h3 class="sect">What ${esc(a.short)} has learned</h3><div id="insp-les"></div><h3 class="sect">Memory</h3><div id="insp-mem"></div>`, 'agent');
+  bindModelPickers($('#modal-card'));
   const fire = $('#i-fire'); if (fire) fire.onclick = () => { if (confirm(`Let ${a.name} go? What they learned stays with the team.`)) { send({ type: 'fire', id }); closeModal(); } };
   const c = $('#insp-av').getContext('2d'); c.imageSmoothingEnabled = false; c.drawImage(personFrame(a.id, a.look, 'down', 'stand', 0), 0, 0, 48, 72);
   $('#i-follow').onclick = () => { closeModal(); renderer.follow = id; renderer.cam.zoom = Math.max(renderer.cam.zoom, 3); };
@@ -583,6 +602,10 @@ function openSettings() {
       ${s.lastError ? `<div class="notice warn">Last error from the model: ${esc(s.lastError)}</div>` : ''}
       ${connectorsBlock(s)}
     </section>
+    <section class="set-sec"><h3 class="set-h">Models per person</h3>
+      <p class="help">Each person starts on the model that suits their job: Sonnet for planning, reviewing and long deliverables, Haiku for short, structured work. Quick replies in meetings and chat always use Haiku. Sonnet is the most capable model allowed.</p>
+      <div class="mlist">${st.order.map((id) => st.agents[id]).filter((a) => a?.model).map((a) => `<div class="mrow"><div class="mwho"><b>${esc(a.name)}</b><span>${esc(a.role)}</span></div><select class="field" data-agent-model="${a.id}" aria-label="Model for ${esc(a.short)}">${modelOptions(a.model)}</select></div>`).join('')}</div>
+    </section>
     <section class="set-sec"><h3 class="set-h">How the team behaves</h3>
       <label class="field-label">Team conversation</label>${seg('collab', s.collab, [['full', 'Full'], ['lean', 'Lean'], ['off', 'Off']])}
       ${help('Full: kickoffs, handoffs, consults and alignment meetings. Lean: fewer calls. Off: agents just work. Each conversation turn is a small model call.')}
@@ -601,6 +624,7 @@ function openSettings() {
   $('#s-budget-save').onclick = () => send({ type: 'setBudget', value: $('#s-budget').value });
   $$('[data-skmode]', card).forEach((b) => (b.onclick = () => send({ type: 'setSkillsMode', value: b.dataset.skmode }))); $$('[data-sk-check]', card).forEach((b) => (b.onclick = () => { b.textContent = 'Checking…'; send({ type: 'skillsCheck', id: b.dataset.skCheck }); })); $$('[data-sk-rollback]', card).forEach((b) => (b.onclick = () => { if (confirm('Roll this skills library back to the previous version?')) send({ type: 'skillsRollback', id: b.dataset.skRollback }); })); $$('[data-sk-approve]', card).forEach((b) => (b.onclick = () => send({ type: 'skillsApprove', id: b.dataset.skApprove }))); $$('[data-sk-decline]', card).forEach((b) => (b.onclick = () => send({ type: 'skillsDecline', id: b.dataset.skDecline })));
   $$('[data-collab]', card).forEach((b) => (b.onclick = () => send({ type: 'setCollab', value: b.dataset.collab }))); $$('[data-hiring]', card).forEach((b) => (b.onclick = () => send({ type: 'setHiring', value: b.dataset.hiring }))); $$('[data-learning]', card).forEach((b) => (b.onclick = () => send({ type: 'setLearning', value: b.dataset.learning })));
+  bindModelPickers(card);
   $('#s-mock').onclick = () => send({ type: 'setMode', mode: 'mock' }); $('#s-live').onclick = () => send({ type: 'setMode', mode: 'live' }); $('#s-cli').onclick = () => send({ type: 'setMode', mode: 'cli' }); const tst = $('#s-test'); if (tst) tst.onclick = () => send({ type: 'testLlm' });
   const scan = $('#cli-scan'); if (scan) scan.onclick = () => { scan.textContent = 'Scanning…'; scan.disabled = true; send({ type: 'cliScan' }); };
   $$('[data-conn]', card).forEach((b) => (b.onclick = () => send({ type: 'cliConnector', name: b.dataset.conn, on: b.dataset.on === '1' })));
@@ -612,10 +636,10 @@ function modelPicker(s) {
   const group = (title, list) => (list.length ? `<optgroup label="${esc(title)}">${list.map((x) => `<option value="${esc(x.id)}" ${x.id === s.model ? 'selected' : ''}>${esc(label(x))}</option>`).join('')}</optgroup>` : '');
   const listed = models.some((x) => x.id === s.model); const cur = models.find((x) => x.id === s.model);
   const live = models.some((x) => x.available);
-  return `<label class="field-label" for="s-model-pick">Model <span class="opt">${live ? 'models your API key can use' : 'built-in list'}</span></label>
+  return `<label class="field-label" for="s-model-pick">Default model <span class="opt">${live ? 'models your API key can use' : 'built-in list'}</span></label>
     <div class="row"><select class="field" style="flex:1" id="s-model-pick">${group('Recommended', models.filter((x) => x.tier === 'recommended'))}${group('Older', models.filter((x) => x.tier === 'older'))}${group('Also on your key', models.filter((x) => x.tier === 'other'))}<option value="__custom" ${listed ? '' : 'selected'}>Custom model ID…</option></select>${s.hasKey ? '<button class="btn sm" id="s-model-refresh">Refresh list</button>' : ''}</div>
-    <div class="row" id="s-model-custom" style="margin-top:6px" ${listed ? 'hidden' : ''}><input class="field" style="flex:1" id="s-model" value="${esc(s.model)}" placeholder="e.g. claude-opus-5-5" /><button class="btn" id="s-model-save">Use this model</button></div>
-    <div class="muted" style="font-size:11.5px;margin-top:4px">${cur?.note ? `${esc(cur.note)} ` : ''}Cost estimates use ${s.price.source === 'env' ? 'your PRICE_IN / PRICE_OUT rates' : s.price.source === 'catalog' ? 'this model\'s list price' : 'a $3 / $15 placeholder (unknown model; set PRICE_IN / PRICE_OUT)'}: ${money(s.price.in)} / ${money(s.price.out)} per million tokens.${s.mode !== 'mock' ? ' Switching runs a connection test.' : ''}</div>
+    <div class="row" id="s-model-custom" style="margin-top:6px" ${listed ? 'hidden' : ''}><input class="field" style="flex:1" id="s-model" value="${esc(s.model)}" placeholder="e.g. claude-sonnet-5-5" /><button class="btn" id="s-model-save">Use this model</button></div>
+    <div class="muted" style="font-size:11.5px;margin-top:4px">${cur?.note ? `${esc(cur.note)} ` : ''}Used for work that belongs to no one in particular, such as connector lookups. Each person has their own model below. Cost estimates use ${s.price.source === 'env' ? 'your PRICE_IN / PRICE_OUT rates' : s.price.source === 'catalog' ? 'this model\'s list price' : 'a $3 / $15 placeholder (unknown model; set PRICE_IN / PRICE_OUT)'}: ${money(s.price.in)} / ${money(s.price.out)} per million tokens.${s.mode !== 'mock' ? ' Switching runs a connection test.' : ''}</div>
     ${s.modelsError ? `<div class="muted" style="font-size:11.5px;color:#a1293a">${esc(s.modelsError)}</div>` : ''}`;
 }
 

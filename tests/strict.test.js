@@ -57,3 +57,24 @@ test('retrying a failed task starts clean', async () => {
   assert.deepEqual([t.warnings, t.meetings, t.decisions, t.thread, t.expertConsults, t.summaryId, t.error], [[], [], [], [], 0, null, null]);
   assert.equal(t.retried, 1);
 });
+
+test('in a live run each request goes out on the right model: the person\'s own, Haiku for light replies, never above Sonnet', async () => {
+  const from = api.state.calls.length;
+  const w0 = world(); const names = Object.fromEntries([...w0.sim.agents.values()].map((a) => [a.name, a.id]));
+  const { w, t } = await (async () => {
+    const w = world({ outside: true }); w.llm.apiKey = 'k'; w.llm.setMode('live'); w.company.hiringMode = 'off';
+    w.company.setAgentModel('indigo', 'claude-haiku-5-5'); // God's override
+    const t = w.company.submitTask({ title: 'Learn about Acsia Technologies Pvt. Ltd. We will be getting them as a client soon.', brief: '' });
+    const end = Date.now() + 90000; while (Date.now() < end && !['done', 'failed'].includes(t.status)) { w.sim.tick(0.1); await new Promise((r) => setTimeout(r, 10)); }
+    return { w, t };
+  })();
+  assert.equal(t.status, 'done', t.error);
+  const calls = api.state.calls.slice(from);
+  assert.ok(calls.length > 10 && calls.every((c) => /^claude-(sonnet|haiku)-/.test(c.model)), [...new Set(calls.map((c) => c.model))].join());
+  const who = (c) => names[Object.keys(names).find((n) => c.system.includes(`You are ${n}, `))];
+  const work = calls.filter((c) => /# Client context/.test(c.system));
+  const byAgent = (id) => work.filter((c) => who(c) === id).map((c) => c.model);
+  assert.ok(byAgent('indigo').length && byAgent('indigo').every((m) => m === 'claude-haiku-5-5'), `indigo (overridden): ${byAgent('indigo')}`);
+  assert.ok(byAgent('sol').length && byAgent('sol').every((m) => m === w.company.agentModel('sol').current), `sol: ${byAgent('sol')}`);
+  assert.ok(calls.some((c) => c.model === 'claude-haiku-5-5' && /kickoff meeting/.test(c.system) && who(c) !== 'indigo'), 'light kickoff replies run on Haiku');
+});

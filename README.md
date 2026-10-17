@@ -9,7 +9,7 @@
 ### A marketing agency run by AI agents, with a control room to match.
 
 ![Node](https://img.shields.io/badge/node-%E2%89%A5%2020-163144?style=flat-square&labelColor=1B405B)
-![Tests](https://img.shields.io/badge/tests-142%20passing-163144?style=flat-square&labelColor=1B405B)
+![Tests](https://img.shields.io/badge/tests-154%20passing-163144?style=flat-square&labelColor=1B405B)
 ![Dependencies](https://img.shields.io/badge/dependencies-1-163144?style=flat-square&labelColor=1B405B)
 ![Modes](https://img.shields.io/badge/modes-simulated%20%C2%B7%20API%20%C2%B7%20Claude%20account-163144?style=flat-square&labelColor=1B405B)
 
@@ -105,7 +105,9 @@ To run the test suite: `npm test`.
 
 ### Three ways to run
 
-There are three ways to run the agents. You can switch between them in Settings at any time, and pick the model from a list there: Claude Opus 5.5 (the default), Sonnet 5.5, Haiku 5.5, Fable 5.1 and older models, each shown with its price. With an API key the list comes from your account, so it only shows models your key can use. Cost estimates and the budget cap follow the selected model's list price.
+There are three ways to run the agents, and you can switch between them in Settings at any time.
+
+**Each person has their own model, and nothing costs more than Sonnet.** Everyone starts on the model that suits their job: Sonnet 5.5 for Vera, the team leads and anyone writing long client-facing work; Haiku 5.5 for short, structured work (Kenji's social posts, Dee's tracking plans, Tomas's skills data). Quick replies in meetings and chat always run on Haiku. Change anyone's model on their card in the office, or for the whole team under **Settings → Models per person**; "Suggested" puts them back. Opus and Fable are never offered or used, even if the API key has them. Cost estimates and the budget cap use the price of the model that made each call.
 
 | | Simulated | API key | Claude account |
 |---|---|---|---|
@@ -320,7 +322,7 @@ A light, frosted-glass control room built to match a calm, high-contrast design 
 | `ANTHROPIC_API_KEY` | none | Enables API-key mode. |
 | `CLAUDE_ACCOUNT` | off | `on` starts in Claude account mode when the `claude` CLI is available. |
 | `CLAUDE_BIN`, `CLI_CONCURRENCY` | `claude`, `3` | Path to the CLI, and how many agent calls may run at once in Claude account mode. |
-| `MODEL` | `claude-opus-5-5` | Model used for all agent calls. Usually chosen in Settings instead (the choice is remembered); this variable overrides it. |
+| `MODEL` | `claude-sonnet-5-5` | Default model for calls that belong to nobody (connector lookups, the connection test). Each person's model is set in Settings. Anything above Sonnet is ignored. |
 | `PRICE_IN`, `PRICE_OUT` | the model's list price | USD per million input and output tokens for cost estimates. Only needed if your rates differ from list prices, or for a model the app does not know. |
 | `BUDGET_CAP_USD` | `5` | Estimated spend at which a live run reverts to simulation. |
 | `MAX_ACTIVE_TASKS` | `3` | Concurrent tasks. |
@@ -439,7 +441,7 @@ The server is authoritative. It streams state to the browser over WebSocket at 1
 npm test
 ```
 
-142 tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (private-address and redirect protection, including every IPv6 spelling, untrusted-content fencing), searching beyond the client's site, site crawling, the org chart, kickoff, handoffs, alignment, escalation, outside-expert consults, hiring policy and approval, People & Talent (requisitions, the rating rule, reports, releases needing approval), upstream skill sync (hardened archive reading against the real repositories, validation, overlay, rollback, approval), the knowledge base and learning loop, stopping, retrying and deleting tasks (including aborting calls in flight and refusing a second retry), the requests tracker, Claude account mode against a fake `claude` binary (sign-in, tool bridge, read-only connector rules, lookups), and the API-key path against scripted fakes of the Messages API: tool use, hiring mid-task, lessons, reflection, prompt-injection resistance, truncation recovery, revisions and timeouts, planning that falls back visibly instead of hanging, signed thinking blocks in tool loops, and full tasks against a strict fake of the API that enforces the real request rules.
+154 tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (private-address and redirect protection, including every IPv6 spelling, untrusted-content fencing), searching beyond the client's site, site crawling, the org chart, kickoff, handoffs, alignment, escalation, outside-expert consults, hiring policy and approval, People & Talent (requisitions, the rating rule, reports, releases needing approval), upstream skill sync (hardened archive reading against the real repositories, validation, overlay, rollback, approval), the knowledge base and learning loop, stopping, retrying and deleting tasks (including aborting calls in flight, stopping site research and refusing a second retry), per-person models (suggestions, the Sonnet limit, overrides and which model each live request uses), the requests tracker, Claude account mode against a fake `claude` binary (sign-in, tool bridge, read-only connector rules, lookups), and the API-key path against scripted fakes of the Messages API: tool use, hiring mid-task, lessons, reflection, prompt-injection resistance, truncation recovery, revisions and timeouts, planning that falls back visibly instead of hanging, signed thinking blocks in tool loops, and full tasks against a strict fake of the API that enforces the real request rules.
 
 </details>
 

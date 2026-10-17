@@ -1,5 +1,6 @@
 // 4EVR the company: takes God's commands, plans the work, runs the agents,
 // keeps the books. All the "business" lives here; the Sim only handles bodies.
+import { isAllowedModel, suggestedModel, LIGHT_MODEL, LIGHT_KINDS } from './models.js';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -41,6 +42,8 @@ export class Company extends EventEmitter {
     this.history = []; // sparkline samples
     this.budgetCap = Number(process.env.BUDGET_CAP_USD || 5);
     this.llm.capFn = () => this.budgetCap; // so a call in progress stops using tools once the cap is reached
+    this.modelChoices = new Map(); // person -> model God picked; anyone not in here uses their suggested model
+    this.llm.modelFor = (agentId, kind) => this.modelFor(agentId, kind);
     this.queue = []; this.active = 0;
     this.completed = 0;
     this.on('comms', (m) => this.addComms(m));
@@ -125,6 +128,32 @@ export class Company extends EventEmitter {
         })
         .finally(() => { this.aborts.delete(t.id); this.active--; if (t.pendingDelete) this.removeTask(t); this.pump(); });
     }
+  }
+
+  // ---------- models per person ----------
+  /** What a person runs on: the suggested model for their job, God's choice if there is one, and why. */
+  agentModel(id) {
+    const a = this.agent(id); if (!a) return null;
+    const { model: suggested, why } = suggestedModel(a); const choice = this.modelChoices.get(id) || null;
+    return { suggested, choice, current: choice || suggested, why };
+  }
+
+  /** The model for one call: the person's model for real work, Haiku for light chatter, the default for calls that belong to nobody. */
+  modelFor(agentId, kind) {
+    const m = agentId ? this.agentModel(agentId) : null; if (!m) return this.llm.model;
+    if (LIGHT_KINDS.has(kind) && !/haiku/.test(m.current)) return LIGHT_MODEL;
+    return m.current;
+  }
+
+  /** God picks a model for someone (null goes back to the suggestion). Never above Sonnet. */
+  setAgentModel(id, model) {
+    const a = this.agent(id); if (!a) throw new Error('No such person.');
+    if (model == null || model === '') this.modelChoices.delete(id);
+    else if (!isAllowedModel(model)) throw new Error('Only Sonnet and Haiku models can be used. Opus and Fable cost too much for this office.');
+    else this.modelChoices.set(id, String(model));
+    this.addLog(`${a.name} now runs on ${this.agentModel(id).current}${model ? '' : ' (suggested)'}`, { type: 'system', agent: id });
+    this.emit('broadcast', { type: 'agent_model', id, model: this.agentModel(id) }); this.save();
+    return this.agentModel(id);
   }
 
   /** A stopped task never continues: called after each step that can take a while. */
@@ -660,7 +689,7 @@ export class Company extends EventEmitter {
       let j = res.simulated ? fallback : extractJson(res.text);
       if (!res.simulated && (!j || !j.objective)) { // the model answered in prose (often after searching): ask once more, plainly, with no tools
         this.addLog('The intake answer was not usable JSON; asking again without tools', { type: 'system', taskId: task.id });
-        res = await this.llm.complete({ kind: 'intake', system, user: `${user}\n\nReply with the JSON object only. No prose, no markdown fences.`, maxTokens: 1200, timeoutMs: deadline, ctx: { title: task.title, brief: task.brief, intake: fallback } });
+        res = await this.llm.complete({ kind: 'intake', agent: vera.id, system, user: `${user}\n\nReply with the JSON object only. No prose, no markdown fences.`, maxTokens: 1200, timeoutMs: deadline, ctx: { title: task.title, brief: task.brief, intake: fallback } });
         this.account(task, res); j = extractJson(res.text);
       }
       if (!j || !j.objective) { this.warn(task, 'Vera could not produce a usable intake brief for this request, so the brief below is a generic fallback. The workstreams are still planned from the request itself.'); return fallback; }
@@ -799,7 +828,7 @@ export class Company extends EventEmitter {
       const data = {
         v: 1, savedAt: Date.now(), seq: this.seq, completed: this.completed, simTime: this.sim.time, skillUse: this.skillUse, history: this.history,
         tasks: [...this.tasks.values()], deliverables: [...this.deliverables.values()], comms: this.comms.slice(-300), log: this.log.slice(-400), agents,
-        llmTotals: this.llm.totals, budgetCap: this.budgetCap, clients: [...this.clients.values()], hires: [...this.hires.values()], settings: { collab: this.collab, hiringMode: this.hiringMode }, hr: this.hrSave(), inbox: this.inboxSave(),
+        llmTotals: this.llm.totals, budgetCap: this.budgetCap, clients: [...this.clients.values()], hires: [...this.hires.values()], settings: { collab: this.collab, hiringMode: this.hiringMode }, modelChoices: Object.fromEntries(this.modelChoices), hr: this.hrSave(), inbox: this.inboxSave(),
       };
       const tmp = path.join(this.dataDir, 'state.json.tmp');
       fs.writeFileSync(tmp, JSON.stringify(data)); fs.renameSync(tmp, path.join(this.dataDir, 'state.json'));
@@ -828,6 +857,7 @@ export class Company extends EventEmitter {
       // files saved before real spend was tracked separately: count their total as spent only if it came from a live session
       if (d.llmTotals) Object.assign(this.llm.totals, d.llmTotals, { spent: d.llmTotals.spent ?? (d.llmTotals.simulated === false ? d.llmTotals.cost || 0 : 0), simulated: this.llm.mode === 'mock' });
       if (d.budgetCap) this.budgetCap = d.budgetCap;
+      for (const [id, m] of Object.entries(d.modelChoices || {})) if (isAllowedModel(m)) this.modelChoices.set(id, m); // an old Opus choice is dropped
       for (const c of d.clients || []) this.clients.set(c.host, c);
       return true;
     } catch (e) { console.error('could not load state', e.message); return false; }

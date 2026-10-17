@@ -43,7 +43,7 @@ const fake = http.createServer((req, res) => {
 });
 await new Promise((r) => fake.listen(0, '127.0.0.1', r));
 process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${fake.address().port}`;
-process.env.MODEL = 'claude-test-model';
+process.env.MODEL = 'claude-sonnet-4-6'; // the default for calls that belong to nobody
 const { world, run } = await import('./helpers.js');
 
 test.after(() => fake.close());
@@ -67,7 +67,7 @@ test('live mode: planner JSON is parsed, bad agents dropped, work is skill-groun
   assert.ok(work, 'copywriting skill text was injected into the system prompt');
   assert.equal(work.headers['x-api-key'], 'sk-ant-test');
   assert.equal(work.headers['anthropic-version'], '2023-06-01');
-  assert.equal(work.body.model, 'claude-test-model');
+  assert.equal(work.body.model, 'claude-sonnet-5-5', "a person's work runs on their own model (Theo's suggestion), not the default");
   assert.ok(work.body.system.at(-1).cache_control, 'the long skill block is marked cacheable');
   assert.match(work.body.system[0].text, /4EVR/, 'charter present');
   assert.match(work.body.messages[0].content, /Habit app for parents/, 'client brief present');

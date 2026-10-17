@@ -30,7 +30,7 @@ export const hr = {
     try {
       const ref = this.skills['hr-job-description'];
       const res = await this.llm.complete({
-        kind: 'hr', maxTokens: 900, ctx: { fallback: JSON.stringify(fallback) },
+        kind: 'hr', maxTokens: 900, agent: nia.id, ctx: { fallback: JSON.stringify(fallback) },
         system: this.personaSystem(nia, `You are writing a job description and a 30/60/90 onboarding plan for a new AI-agent colleague. Use the playbook below for structure, but leave out anything that only applies to human employees (salary, benefits, labour law, location). The new colleague works only from the skills listed.\n\n${ref ? skillPrompt(ref, 6000) : ''}`),
         user: `Role: ${role}\nReports to: ${lead.name}, ${lead.role}\nTeam: ${dept}\nSkills they own: ${skills.join(', ')}\nWhy we need them: ${why || 'n/a'}${domain ? `\nDomain: ${domain}` : ''}\n\nReply with JSON only: {"jd":"markdown job description, under 300 words, starting with a # title","plan":[{"phase":"First 30 days","goals":["…"]},{"phase":"Days 31 to 60","goals":["…"]},{"phase":"Days 61 to 90","goals":["…"]}]}`,
       });
@@ -86,7 +86,7 @@ export const hr = {
     try {
       const ref = this.skills['hr-performance-management'];
       const res = await this.llm.complete({
-        kind: 'hr', maxTokens: 500, ctx: { fallback: narrative },
+        kind: 'hr', maxTokens: 500, agent: nia.id, ctx: { fallback: narrative },
         system: this.personaSystem(nia, `You are writing a short, fair performance review of an AI-agent colleague. Use only the facts given; invent nothing. The rating is fixed by the numbers: do not change it. Three to five sentences, plain text.\n\n${ref ? skillPrompt(ref, 4000) : ''}`),
         user: `Colleague: ${a.name}, ${a.role}\nRating (fixed): ${rating}\nFacts:\n${factLines.join('\n')}\nStrengths found: ${strengths.join('; ') || 'none yet'}\nDevelopment areas: ${growth.join('; ') || 'none'}`,
       });
