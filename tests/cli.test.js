@@ -110,6 +110,6 @@ test('learning runs in Claude account mode too, not only with an API key', async
   const sub = { id: 'T5.1', skill: 'seo-audit', agent: 'rafa' }; const a = w.company.agent('rafa');
   const learned = await w.company.reflect(t, sub, a, { verdict: 'revise', improvement: 'Cite sources.', by: 'vera' });
   assert.ok(Array.isArray(learned), 'reflection ran');
-  assert.equal(w.company.canStudy(), true); l.totals.cost = 100; assert.equal(w.company.canStudy(), false, 'the half-budget limit applies in this mode');
+  assert.equal(w.company.canStudy(), true); l.totals.spent = 100; assert.equal(w.company.canStudy(), false, 'the half-budget limit applies in this mode');
   reset();
 });

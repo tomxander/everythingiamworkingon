@@ -76,19 +76,25 @@ export const inbox = {
     return `Logged as ${r.req.id}. God answers asynchronously, so do not wait: continue now, state your assumption for this item, and write it in "Next actions" so the answer can be applied later.`;
   },
 
+  /** What was really looked at before asking: mention the client's site only when pages from it were read. */
+  triedSoFar(task, base) {
+    const host = (task.sources || []).find((x) => x.pages?.length)?.host;
+    return host ? `${base} and read ${host}` : base;
+  },
+
   /** Simulated mode: each playbook has the data it would really want. Raised once per task, unless the brief already supplies it. */
   mockDataNeeds(task, a, sub) {
     const need = DATA_NEEDS[sub.skill]; if (!need) return;
     const [kind, what, why, hint] = need;
     if (hint && new RegExp(hint, 'i').test(`${task.title} ${task.brief || ''}`)) return;
     if ([...this.inboxState().values()].filter((r) => r.taskId === task.id && r.origin === 'agent').length >= 3) return;
-    this.raiseRequest(task, a, { kind, what, why, tried: 'Searched the web and read the client site; this is not public.', subId: sub.id });
+    this.raiseRequest(task, a, { kind, what, why, tried: `${this.triedSoFar(task, 'Searched the web')}; this is not public.`, subId: sub.id });
   },
 
   /** The open questions from intake become requests, so they are tracked instead of buried in a summary. */
   raiseIntakeQuestions(task) {
     const vera = this.agent('vera');
-    for (const q of (task.intake?.openQuestions || []).slice(0, 3)) this.raiseRequest(task, vera, { kind: 'question', what: q, why: 'Raised during intake.', tried: 'Read the brief and the site.', origin: 'intake' });
+    for (const q of (task.intake?.openQuestions || []).slice(0, 3)) this.raiseRequest(task, vera, { kind: 'question', what: q, why: 'Raised during intake.', tried: `${this.triedSoFar(task, 'Read the brief')}.`, origin: 'intake' });
   },
 
   answerRequest(id, { text = '', files = [], decline = false } = {}) {

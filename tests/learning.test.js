@@ -100,7 +100,7 @@ test('study is gated by mode, daily limit and live budget, and fails quietly whe
   assert.equal(c.canStudy(), false, 'passive does not study');
   c.kb.mode = 'active'; assert.equal(c.canStudy(), true);
   c._studyDay = c.sim.day; c._studyToday = 999; assert.equal(c.canStudy(), false, 'daily limit');
-  c._studyToday = 0; c.llm.apiKey = 'k'; c.llm.setMode('live'); c.llm.totals.cost = c.budgetCap * 0.6; assert.equal(c.canStudy(), false, 'learning never eats more than half the budget');
+  c._studyToday = 0; c.llm.apiKey = 'k'; c.llm.setMode('live'); c.llm.totals.spent = c.budgetCap * 0.6; assert.equal(c.canStudy(), false, 'learning never eats more than half the budget');
   c.llm.setMode('mock'); c.kb.mode = 'off'; assert.equal(c.canStudy(), false);
   c.kb.mode = 'active'; c._studyToday = 0; searchMode = 'down';
   const { clearSearchCache } = await import('../server/tools.js'); clearSearchCache();

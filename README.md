@@ -9,7 +9,7 @@
 ### A marketing agency run by AI agents, with a control room to match.
 
 ![Node](https://img.shields.io/badge/node-%E2%89%A5%2020-163144?style=flat-square&labelColor=1B405B)
-![Tests](https://img.shields.io/badge/tests-137%20passing-163144?style=flat-square&labelColor=1B405B)
+![Tests](https://img.shields.io/badge/tests-142%20passing-163144?style=flat-square&labelColor=1B405B)
 ![Dependencies](https://img.shields.io/badge/dependencies-1-163144?style=flat-square&labelColor=1B405B)
 ![Modes](https://img.shields.io/badge/modes-simulated%20%C2%B7%20API%20%C2%B7%20Claude%20account-163144?style=flat-square&labelColor=1B405B)
 
@@ -112,7 +112,7 @@ There are three ways to run the agents. You can switch between them in Settings 
 | **Setup** | None. This is the default. | `ANTHROPIC_API_KEY=sk-ant-... npm start`, or paste the key in Settings. | Install [Claude Code](https://claude.com/claude-code), run `claude` once and sign in. Choose it in Settings, or start with `CLAUDE_ACCOUNT=on`. |
 | **Who does the thinking** | A built-in simulator that follows the real skill outlines. Output is stamped SIMULATED. | Claude, through the Messages API, with the full skill text and prompt caching. | Claude, through your signed-in `claude` CLI. |
 | **Extra reach** | Still searches the web for real. | Web search and page reading. | Your account's web search, plus the connectors you switch on. |
-| **Cost** | None. Figures are estimates of what a live run would cost. | Metered. A budget cap (default $5) drops back to simulation. | Counts against your account's limits. The same cap applies. |
+| **Cost** | None. Figures are estimates of what a live run would cost and never count against the budget cap. | Metered. A budget cap (default $5) drops back to simulation. | Counts against your account's limits. The same cap applies. |
 
 > The API-key path is tested against a local fake of the Messages API, and Claude account mode against a fake `claude` binary plus real calls to the CLI. Neither is exercised against production services by the test suite. If a live call fails, the reason is shown on the task card, and Settings has a **Test connection** button that checks the key or sign-in, the model and (in Claude account mode) the tool bridge.
 
@@ -439,7 +439,7 @@ The server is authoritative. It streams state to the browser over WebSocket at 1
 npm test
 ```
 
-137 tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (private-address and redirect protection, untrusted-content fencing), searching beyond the client's site, site crawling, the org chart, kickoff, handoffs, alignment, escalation, outside-expert consults, hiring policy and approval, People & Talent (requisitions, the rating rule, reports, releases needing approval), upstream skill sync (hardened archive reading against the real repositories, validation, overlay, rollback, approval), the knowledge base and learning loop, stopping and deleting tasks (including aborting calls in flight), the requests tracker, Claude account mode against a fake `claude` binary (sign-in, tool bridge, read-only connector rules, lookups), and the API-key path against scripted fakes of the Messages API: tool use, hiring mid-task, lessons, reflection, prompt-injection resistance, truncation recovery, revisions and timeouts, planning that falls back visibly instead of hanging, signed thinking blocks in tool loops, and full tasks against a strict fake of the API that enforces the real request rules.
+142 tests cover floor-plan connectivity, roster and skill integrity, planning and routing, complete simulated tasks, persistence, safe web fetching and search (private-address and redirect protection, including every IPv6 spelling, untrusted-content fencing), searching beyond the client's site, site crawling, the org chart, kickoff, handoffs, alignment, escalation, outside-expert consults, hiring policy and approval, People & Talent (requisitions, the rating rule, reports, releases needing approval), upstream skill sync (hardened archive reading against the real repositories, validation, overlay, rollback, approval), the knowledge base and learning loop, stopping, retrying and deleting tasks (including aborting calls in flight and refusing a second retry), the requests tracker, Claude account mode against a fake `claude` binary (sign-in, tool bridge, read-only connector rules, lookups), and the API-key path against scripted fakes of the Messages API: tool use, hiring mid-task, lessons, reflection, prompt-injection resistance, truncation recovery, revisions and timeouts, planning that falls back visibly instead of hanging, signed thinking blocks in tool loops, and full tasks against a strict fake of the API that enforces the real request rules.
 
 </details>
 

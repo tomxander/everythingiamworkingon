@@ -20,7 +20,8 @@ export class LLM {
     this.model = process.env.MODEL || DEFAULT_MODEL;
     this.liveModels = null; this.liveModelsAt = 0; this.modelsError = null;
     this.mode = this.apiKey ? 'live' : 'mock';
-    this.totals = { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cost: 0, simulated: this.mode === 'mock' };
+    // cost: everything, including what simulated calls would have cost; spent: only real calls, which is what the budget cap guards
+    this.totals = { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cost: 0, spent: 0, simulated: this.mode === 'mock' };
     this.lastError = null;
     this.cli = new ClaudeCli(); this.bridge = new McpBridge();
     this.cliInfo = { checked: false, ok: false, version: null, error: null, servers: [], scannedAt: null, plugins: [] };
@@ -115,10 +116,11 @@ export class LLM {
     return mergeModels(this.liveModels);
   }
 
-  account(inTok, outTok, cacheRead = 0) {
+  account(inTok, outTok, cacheRead = 0, real = true) {
     this.totals.calls++;
     this.totals.inputTokens += inTok; this.totals.outputTokens += outTok; this.totals.cacheReadTokens += cacheRead;
-    const p = this.price(); this.totals.cost += (inTok * p.in + outTok * p.out + cacheRead * p.in * 0.1) / 1e6; // cache reads bill at about a tenth of input
+    const p = this.price(); const c = (inTok * p.in + outTok * p.out + cacheRead * p.in * 0.1) / 1e6; // cache reads bill at about a tenth of input
+    this.totals.cost += c; if (real) this.totals.spent += c;
   }
 
   /**
@@ -133,7 +135,7 @@ export class LLM {
       const out = mockComplete(kind, ctx);
       const inTok = Math.ceil(((Array.isArray(system) ? system.join('') : system || '').length + (user || '').length) / 4);
       const outTok = Math.ceil(out.text.length / 4);
-      this.account(inTok, outTok);
+      this.account(inTok, outTok, 0, false); // an estimate, never charged against the budget
       return { text: out.text, headline: out.headline, latencyMs: out.latencyMs, usage: { input: inTok, output: outTok }, simulated: true, toolCalls: 0 };
     }
     if (this.mode === 'cli') return this.cliComplete({ system, user, tools, onTool, maxTurns, timeoutMs, signal });

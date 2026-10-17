@@ -303,7 +303,8 @@ export const hiring = {
   async fire(id) {
     const a = this.agent(id); if (!a?.hired) throw new Error('Only people who were hired can be let go.');
     if (a.busy) throw new Error(`${a.short} is working right now.`);
-    if (this.load_of(id) > 0) throw new Error(`${a.short} still has work assigned.`);
+    const assigned = [...this.tasks.values()].some((t) => t.assignee === id && ['queued', 'researching', 'planning', 'active', 'review', 'stopping'].includes(t.status));
+    if (this.load_of(id) > 0 || assigned) throw new Error(`${a.short} still has work assigned.`);
     this.kb.inherit?.(id, a.dept);
     this.talk(null, { from: 'god', to: id, kind: 'hire', text: `${a.name} has been let go. What they learned stays with the team.` });
     this.hires.delete(id); this.sim.removeAgent(id);

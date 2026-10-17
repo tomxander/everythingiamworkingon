@@ -20,7 +20,7 @@ const reply = (body) => {
 };
 const api = await strictApi({ reply, toolRounds: 3, toolInput: (name) => ({ fetch_url: { url: `${W}/page` }, web_search: { query: 'Acsia Technologies', source: 'web' }, ask_teammate: { to: 'rafa', question: 'Any SEO angle?' }, request_info: { kind: 'data', what: 'Last 90 days of analytics by source', why: 'baseline', tried: 'Searched the web, nothing public.' }, request_hire: { role: 'x', need: 'x', why: 'x' }, read_skill_reference: { file: 'nothing.md' }, save_lesson: { text: 'Cite sources.' }, recall_lessons: { topic: 'x' } })[name] || {} });
 process.env.ANTHROPIC_BASE_URL = api.url;
-const { world } = await import('./helpers.js');
+const { world, run } = await import('./helpers.js');
 test.after(() => { api.close(); web.close(); });
 
 async function runLive(title, ms = 90000) {
@@ -51,6 +51,7 @@ test('a whole live task runs against the strict API: thinking blocks, repeated t
 
 test('retrying a failed task starts clean', async () => {
   const w = world(); const t = w.company.submitTask({ title: 'Learn about Acsia', brief: '' });
+  w.company.cancelTask(t.id); await run(w.sim, () => t.status === 'cancelled', 600); // a run must have ended before it can be retried
   Object.assign(t, { status: 'failed', error: 'old', warnings: ['old warning'], meetings: [{ type: 'kickoff' }], decisions: [{ issue: 'x' }], thread: [{ text: 'x' }], expertConsults: 3, summaryId: 'D1' });
   w.company.retryTask(t.id);
   assert.deepEqual([t.warnings, t.meetings, t.decisions, t.thread, t.expertConsults, t.summaryId, t.error], [[], [], [], [], 0, null, null]);

@@ -20,7 +20,7 @@
       <div class="chip clock" title="Office time. A day lasts 12 real minutes at 1x."><span id="clock-icon"><i data-ico="sun"></i></span><span id="clock">Day 1 · 08:30</span></div>
       <button class="chip mode" id="mode-chip" title="Click to open settings"><span class="dot"></span><span id="mode-label">Simulated</span></button>
       <div class="chip" title="Tokens used this session (estimated in simulated mode)"><b id="tok">0</b> tokens</div>
-      <div class="chip" title="Estimated spend against the budget cap"><b id="cost">$0.00</b><span class="muted">of <span id="cap">$5</span></span></div>
+      <div class="chip" title="Estimated spend against the budget cap"><b id="cost">$0.00</b><span class="muted" id="cap">estimated</span></div>
     </div>
     <div class="top-right">
       <div class="seg" id="speed">
@@ -70,8 +70,8 @@
   <footer id="console">
     <form id="task-form" autocomplete="off" aria-label="Give the team a task">
       <label class="console-label" for="task-title">God console</label>
-      <input id="task-title" type="text" maxlength="140" placeholder="Give the team a task: the site, the goal and a number" title="For example: Get acsiatech.com more qualified leads, 40 enquiries a month" />
-      <textarea id="task-brief" rows="1" maxlength="4000" aria-label="Brief" placeholder="Brief (optional): customers, budget, deadline, competitors" title="Who the customers are, budget, deadline, what has been tried, competitors. The more specific, the better the work."></textarea>
+      <input id="task-title" type="text" maxlength="140" placeholder="Give the team a task: the site, goal and a number" title="For example: Get acsiatech.com more qualified leads, 40 enquiries a month" />
+      <textarea id="task-brief" rows="1" maxlength="4000" aria-label="Brief" placeholder="Brief: who, budget, deadline" title="Who the customers are, budget, deadline, what has been tried, competitors. The more specific, the better the work."></textarea>
       <select id="task-assignee" aria-label="Who does it" title="Who does it"><option value="">Vera plans it</option></select>
       <select id="task-tpl" aria-label="Start from a template" title="Start from a template"><option value="">Templates</option></select>
       <button class="primary assign" type="submit"><i data-ico="enter"></i><span>Assign</span></button>

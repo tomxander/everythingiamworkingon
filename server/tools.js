@@ -13,16 +13,33 @@ const TIMEOUT_MS = 15_000;
 const UA = 'Mozilla/5.0 (compatible; 4EVR-HQ/1.0; +https://github.com/tomxander/everythingiamworkingon)';
 
 // ---------------------------------------------------------------- SSRF guard
+/** IPv6 text to its eight 16-bit groups, so every spelling of the same address is judged the same. */
+function expandIPv6(ip) {
+  let v = ip.toLowerCase().replace(/%.*$/, '');
+  const dotted = v.match(/(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (dotted) { const [a, b, c, d] = dotted.slice(1).map(Number); v = v.slice(0, dotted.index) + `${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`; }
+  const halves = v.split('::'); if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : []; const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0; if (fill < 0) return null;
+  const groups = [...head, ...Array(fill).fill('0'), ...tail].map((x) => parseInt(x, 16));
+  return groups.length === 8 && groups.every((x) => x >= 0 && x <= 0xffff) ? groups : null;
+}
+
 export function isPrivateAddress(ip) {
   if (net.isIPv4(ip)) {
     const [a, b] = ip.split('.').map(Number);
     return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
   }
   if (net.isIPv6(ip)) {
-    const v = ip.toLowerCase();
-    if (v === '::1' || v === '::') return true;
-    if (v.startsWith('fc') || v.startsWith('fd') || v.startsWith('fe8') || v.startsWith('fe9') || v.startsWith('fea') || v.startsWith('feb')) return true;
-    const m = v.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/); if (m) return isPrivateAddress(m[1]);
+    const g = expandIPv6(ip); if (!g) return true;
+    if (g.slice(0, 7).every((x) => x === 0) && g[7] <= 1) return true; // :: and ::1
+    if (g[0] >= 0xfc00 && g[0] <= 0xfdff) return true; // unique local
+    if (g[0] >= 0xfe80 && g[0] <= 0xfebf) return true; // link local
+    if (g[0] >= 0xff00) return true; // multicast
+    // IPv4 carried inside IPv6 (::ffff:a.b.c.d, ::a.b.c.d, 64:ff9b::a.b.c.d), in dotted or hex form: judge the IPv4 address
+    const mapped = g.slice(0, 5).every((x) => x === 0) && (g[5] === 0xffff || g[5] === 0);
+    const nat64 = g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0);
+    if (mapped || nat64) return isPrivateAddress(`${g[6] >> 8}.${g[6] & 255}.${g[7] >> 8}.${g[7] & 255}`);
     return false;
   }
   return true;
@@ -60,7 +77,8 @@ export function rawGet(urlStr, redirectsLeft = 4, opts = {}) {
     let u;
     try { u = new URL(urlStr); } catch { return reject(new Error('Invalid URL')); }
     if (!/^https?:$/.test(u.protocol)) return reject(new Error('Only http and https are supported'));
-    if (net.isIP(u.hostname) && process.env.ALLOW_PRIVATE_FETCH !== '1' && isPrivateAddress(u.hostname)) return reject(new Error('Blocked: that address is private or internal.'));
+    const literal = u.hostname.replace(/^\[(.*)\]$/, '$1'); // URL keeps IPv6 brackets, and IP literals skip the DNS-time check
+    if (net.isIP(literal) && process.env.ALLOW_PRIVATE_FETCH !== '1' && isPrivateAddress(literal)) return reject(new Error('Blocked: that address is private or internal.'));
     const lib = u.protocol === 'https:' ? https : http;
     const req = lib.request(u, {
       method: 'GET', lookup: guardedLookup, timeout: TIMEOUT_MS,

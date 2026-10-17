@@ -86,7 +86,7 @@ export class Company extends EventEmitter {
   async sleepSim(sec, tok) { return this.sim.sleep(sec, tok); }
 
   guardBudget() {
-    if (this.llm.mode !== 'mock' && this.llm.totals.cost >= this.budgetCap) {
+    if (this.llm.mode !== 'mock' && this.llm.totals.spent >= this.budgetCap) {
       this.llm.setMode('mock');
       this.toast(`Budget cap of $${this.budgetCap.toFixed(2)} reached. Switched to simulation mode.`, 'warn');
       this.addLog(`Budget cap $${this.budgetCap.toFixed(2)} reached; switched to simulated mode.`, { type: 'system' });
@@ -174,8 +174,10 @@ export class Company extends EventEmitter {
 
   retryTask(id) {
     const t = this.tasks.get(id); if (!t) throw new Error('No such task.');
+    // only a run that has ended can be restarted; otherwise two runs would share one task (and one would never release its slot)
+    if (!['failed', 'interrupted', 'cancelled'].includes(t.status) || this.queue.includes(t) || this.aborts?.has(t.id)) throw new Error(`${id} is not finished yet, so it cannot be retried.`);
     // start clean: nothing from the failed run (warnings, meetings, decisions, discussion, consult counts) should leak into the retry
-    Object.assign(t, { status: 'queued', subtasks: [], plan: null, error: null, warnings: [], meetings: [], decisions: [], thread: [], expertConsults: 0, summaryId: null, intake: null, cancelled: false, pendingDelete: false, finished: null, retried: (t.retried || 0) + 1 });
+    Object.assign(t, { status: 'queued', subtasks: [], plan: null, error: null, warnings: [], meetings: [], decisions: [], thread: [], expertConsults: 0, summaryId: null, intake: null, retro: null, learned: [], profileId: null, sources: [], cancelled: false, pendingDelete: false, finished: null, retried: (t.retried || 0) + 1 });
     this.pushTask(t);
     this.queue.push(t); this.pump();
   }
@@ -192,6 +194,10 @@ export class Company extends EventEmitter {
     this.checkpoint(task);
 
     let plan;
+    if (task.assignee && !this.agent(task.assignee)) {
+      // the person it was assigned to has since left (a retry of an old task): Vera plans it instead of the run crashing
+      this.warn(task, `${task.assignee} is no longer on the team, so Vera planned this instead.`); task.assignee = null;
+    }
     if (task.assignee) {
       const a = this.agent(task.assignee);
       task.intake = heuristicIntake(task.title, task.brief, this.primarySnapshot(task));
@@ -813,7 +819,8 @@ export class Company extends EventEmitter {
       for (const x of d.deliverables || []) this.deliverables.set(x.id, x);
       this.comms = d.comms || []; this.log = d.log || [];
       for (const [id, st] of Object.entries(d.agents || {})) { const a = this.agent(id); if (a) { a.stats = { ...a.stats, ...st.stats }; a.memory = st.memory || []; a.skillUse = st.skillUse || {}; a.mood = st.mood ?? a.mood; a.energy = st.energy ?? a.energy; } }
-      if (d.llmTotals) Object.assign(this.llm.totals, d.llmTotals, { simulated: this.llm.mode === 'mock' });
+      // files saved before real spend was tracked separately: count their total as spent only if it came from a live session
+      if (d.llmTotals) Object.assign(this.llm.totals, d.llmTotals, { spent: d.llmTotals.spent ?? (d.llmTotals.simulated === false ? d.llmTotals.cost || 0 : 0), simulated: this.llm.mode === 'mock' });
       if (d.budgetCap) this.budgetCap = d.budgetCap;
       for (const c of d.clients || []) this.clients.set(c.host, c);
       return true;

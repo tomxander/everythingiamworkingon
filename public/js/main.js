@@ -164,8 +164,10 @@ function updateTop() {
   $('#mode-chip').classList.toggle('live', live);
   $('#mode-label').textContent = s.mode === 'cli' ? `Claude account, ${modelName(s)}` : live ? `API key, ${modelName(s)}` : 'Simulated';
   const t = stt?.llm?.totals;
-  if (t) { $('#tok').textContent = fmtNum(t.inputTokens + t.outputTokens); $('#cost').textContent = (t.simulated ? '~' : '') + fmtMoney(t.cost); }
-  $('#cap').textContent = `$${s.budgetCap}`;
+  // simulated runs show what a live run would have cost; live runs show real spend against the cap
+  if (t) { $('#tok').textContent = fmtNum(t.inputTokens + t.outputTokens); $('#cost').textContent = live ? fmtMoney(t.spent ?? t.cost) : `~${fmtMoney(t.cost)}`; }
+  $('#cap').textContent = live ? `of $${s.budgetCap}` : 'estimated';
+  $('#cost').parentElement.title = live ? 'Real spend this session against the budget cap' : 'What this would have cost with real Claude. Nothing is spent in simulated mode.';
 }
 $('#speed').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
@@ -217,6 +219,9 @@ function setTab(tab) {
 
 // ------------------------------------------------------------ tasks panel
 let tasksQueued = false;
+// What the person pressed is what the label says: Stop leads to Stopped.
+const STATUS_LABEL = { cancelled: 'stopped', stopping: 'stopping', interrupted: 'interrupted', review: 'in review' };
+const statusLabel = (v) => STATUS_LABEL[v] || v;
 function renderTasksSoon() { if (tasksQueued) return; tasksQueued = true; setTimeout(() => { tasksQueued = false; renderTasks(); }, 120); }
 
 function avatar(id, extra = '') {
@@ -241,7 +246,7 @@ function renderTasks() {
     const agents = [...new Set(t.subtasks.map((s) => s.agent))];
     const open = st.openTasks.has(t.id);
     return `<div class="card ${open ? 'open' : ''}" data-id="${t.id}">
-      <div class="task-head" data-toggle="${t.id}"><span class="task-id">${t.id}</span><span class="task-title">${esc(t.title)}</span><span class="status ${t.status}">${t.status}</span></div>
+      <div class="task-head" data-toggle="${t.id}"><span class="task-id">${t.id}</span><span class="task-title">${esc(t.title)}</span><span class="status ${t.status}">${statusLabel(t.status)}</span></div>
       <div class="progress"><i style="width:${pct}%"></i></div>
       <div class="task-meta"><span class="avatars">${agents.length ? agents.map((a) => avatar(a)).join('') : '<span>Vera is planning…</span>'}</span><span>${total ? `${done}/${total}` : ''} ${t.tokens ? `· ${fmtNum(t.tokens)} tok` : ''}${t.simulated ? ' · sim' : ''}</span></div>
       ${open ? taskDetail(t) : ''}
@@ -250,7 +255,7 @@ function renderTasks() {
   $$('[data-toggle]', p).forEach((h) => (h.onclick = () => { const id = h.dataset.toggle; st.openTasks.has(id) ? st.openTasks.delete(id) : st.openTasks.add(id); renderTasks(); }));
   $$('[data-skill]', p).forEach((s) => (s.onclick = (e) => { e.stopPropagation(); send({ type: 'skill', name: s.dataset.skill }); }));
   $$('[data-deliv]', p).forEach((s) => (s.onclick = () => send({ type: 'deliverable', id: s.dataset.deliv })));
-  $$('[data-retry]', p).forEach((s) => (s.onclick = () => send({ type: 'retry', taskId: s.dataset.retry })));
+  $$('[data-retry]', p).forEach((s) => (s.onclick = () => { s.disabled = true; send({ type: 'retry', taskId: s.dataset.retry }); }));
   $$('[data-stop]', p).forEach((b) => (b.onclick = (e) => { e.stopPropagation(); if (confirm(`Stop ${b.dataset.stop}? Work in progress is discarded; finished deliverables are kept.`)) { b.disabled = true; send({ type: 'cancelTask', taskId: b.dataset.stop }); } }));
   $$('[data-del]', p).forEach((b) => (b.onclick = (e) => { e.stopPropagation(); const t = st.tasks.get(b.dataset.del); const running = t && ['queued', 'researching', 'planning', 'active', 'review'].includes(t.status);
     if (confirm(`Delete ${b.dataset.del}${running ? ' (it will be stopped first)' : ''}? Its deliverables, requests and messages are removed. What the team learned from it is kept.`)) { b.disabled = true; send({ type: 'deleteTask', taskId: b.dataset.del }); } }));
@@ -260,7 +265,7 @@ function renderTasks() {
 function taskDetail(t) {
   const subs = t.subtasks.map((s) => `<div class="sub">${avatar(s.agent)}<div class="what"><b data-agent="${s.agent}" style="cursor:pointer">${esc(st.agents[s.agent]?.short || s.agent)}</b> <span class="skill" data-skill="${s.skill}">${s.skill}</span>${s.consult ? ` <span class="muted">· consulted ${esc(nm(s.consult))}</span>` : ''}
         <div class="hl">${esc(s.status === 'done' ? (s.headline || s.instruction) : s.instruction)}</div>${s.review ? `<div class="rv">${esc(nm(s.review.by))}: ${esc(s.review.text)}</div>` : ''}${s.status === 'failed' && s.error ? `<div class="rv" style="color:#a1293a;font-style:normal">${esc(s.error)}</div>` : ''}</div>
-        <div style="text-align:right"><span class="status ${s.status === 'working' ? 'active' : s.status === 'done' ? 'done' : s.status === 'failed' ? 'failed' : ''}">${s.status}</span>${s.outputId ? `<div><button class="btn sm" data-deliv="${s.outputId}" style="margin-top:4px">Read</button></div>` : ''}</div></div>`).join('');
+        <div style="text-align:right"><span class="status ${s.status === 'working' ? 'active' : s.status === 'done' ? 'done' : s.status === 'failed' ? 'failed' : ''}">${statusLabel(s.status)}</span>${s.outputId ? `<div><button class="btn sm" data-deliv="${s.outputId}" style="margin-top:4px">Read</button></div>` : ''}</div></div>`).join('');
   return `${t.brief ? `<div class="plan"><b>Brief:</b> ${esc(t.brief)}</div>` : ''}${(t.warnings || []).map((w) => `<div class="notice warn with-ico">${icon('alert')}<span>${esc(w)}</span></div>`).join('')}${intakeHtml(t)}${teamHtml(t)}${t.plan ? `<div class="plan"><b>Plan:</b> ${esc(t.plan.summary)}</div>` : ''}${subs}
     <div class="task-actions">${t.summaryId ? `<button class="btn primary" data-deliv="${t.summaryId}">Read executive summary</button>` : ''}${t.profileId ? `<button class="btn" data-deliv="${t.profileId}">Client profile</button>` : ''}${['failed', 'interrupted', 'cancelled'].includes(t.status) ? `<button class="btn" data-retry="${t.id}">Retry</button>` : ''}${['queued', 'researching', 'planning', 'active', 'review'].includes(t.status) ? `<button class="btn" data-stop="${t.id}">${icon('stop')}Stop</button>` : ''}${t.status === 'stopping' ? '<span class="muted">Stopping…</span>' : `<button class="btn" data-del="${t.id}" style="margin-left:auto">Delete</button>`}</div>${t.error ? `<div class="notice warn" style="white-space:pre-wrap">${esc(t.error)}</div>` : ''}`;
 }
@@ -473,11 +478,11 @@ function renderMetrics() {
   p.innerHTML = `
     <div class="tiles">
       ${tile('Tasks done', s.completed, `of ${s.tasks}`)}${tile('Deliverables', s.deliverables)}${tile('Active', s.active, `+${s.queued} queued`)}
-      ${tile('Tokens', fmtNum(t.inputTokens + t.outputTokens), t.simulated ? 'est.' : '')}${tile(`Spend, cap $${s.budgetCap}`, (t.simulated ? '~' : '') + fmtMoney(t.cost))}${tile('API calls', t.calls)}
+      ${tile('Tokens', fmtNum(t.inputTokens + t.outputTokens), t.simulated ? 'est.' : '')}${t.simulated ? tile('Estimated cost', `~${fmtMoney(t.cost)}`, 'nothing spent') : tile(`Spend, cap $${s.budgetCap}`, fmtMoney(t.spent ?? t.cost))}${tile('API calls', t.calls)}
       ${tile('Morale', s.morale + '%')}${tile('Energy', s.energy + '%')}${tile('Cached', fmtNum(t.cacheReadTokens), 'tok')}
       ${tile('People', s.hiring?.headcount ?? '', `${s.hiring?.hired ?? 0} hired`)}${tile('Lessons', s.learning?.active ?? 0, `${s.learning?.playbooks ?? 0} playbooks`)}${tile('Study', s.learning?.studySessions ?? 0, 'sessions')}
     </div>
-    ${live ? '' : `<div class="notice">Simulated mode: tokens and cost are estimates of what the real calls would use. Add an API key in Settings to run live Claude agents.</div>`}
+    ${live ? '' : `<div class="notice">Simulated mode: tokens and cost are estimates of what real calls would use, and nothing is spent. Connect your Claude account or an API key in Settings to run real agents.</div>`}
     <h3 class="sect">Token usage over time</h3>${spark(hist.map((h) => h.tokens), '#5ee7ff')}
     <h3 class="sect">Deliverables over time</h3>${spark(hist.map((h) => h.delivs), '#ff6ec7')}
     <h3 class="sect">Departments</h3>

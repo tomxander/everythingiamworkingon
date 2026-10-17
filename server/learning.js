@@ -185,7 +185,7 @@ export const learning = {
     if (this.kb.mode !== 'active') return false;
     const day = this.sim.day; if (this._studyDay !== day) { this._studyDay = day; this._studyToday = 0; }
     if (this._studyToday >= Math.max(1, Math.round(STUDY_PER_DAY * this.kb.studyFactor()))) return false; // studies more when it pays off, less when it does not
-    if (this.llm.mode !== 'mock' && this.llm.totals.cost >= this.budgetCap * 0.5) return false; // learning never eats the client budget
+    if (this.llm.mode !== 'mock' && this.llm.totals.spent >= this.budgetCap * 0.5) return false; // learning never eats the client budget
     return true;
   },
 

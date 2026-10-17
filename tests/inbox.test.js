@@ -63,3 +63,12 @@ test('applying answers updates the deliverables that asked, once, and the state 
   w.company.save(); const w2 = world(); w2.company.dataDir = w.company.dataDir; w2.company.load();
   assert.equal(w2.company.requestsPublic().find((x) => x.id === r.id).status, 'answered');
 });
+
+test('"already tried" only mentions a site when one was actually read', async () => {
+  const w = world();
+  const t = w.company.submitTask({ title: 'Launch a newsletter for an industrial parts maker: 500 subscribers in 90 days', brief: 'B2B. Budget $5k.' });
+  assert.ok(await finish(w, t)); assert.equal(t.status, 'done', t.error);
+  const reqs = w.company.requestsPublic().filter((r) => r.taskId === t.id);
+  assert.ok(reqs.length, 'requests were raised');
+  for (const r of reqs) assert.doesNotMatch(r.tried, /site/i, `no site was named, yet: ${r.tried}`);
+});
