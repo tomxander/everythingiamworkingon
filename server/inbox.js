@@ -127,22 +127,32 @@ export const inbox = {
   async applyAnswers(taskId) {
     const task = this.tasks.get(taskId); if (!task) throw new Error('No such task.');
     const todo = [...this.inboxState().values()].filter((r) => r.taskId === taskId && r.status === 'answered' && !r.appliedAt); if (!todo.length) throw new Error('Nothing new to apply.');
-    const subs = task.subtasks.filter((s) => s.status === 'done' && s.outputId && todo.some((r) => !r.subId || r.subId === s.id));
+    const ready = task.subtasks.filter((s) => s.status === 'done' && s.outputId && this.deliverables.has(s.outputId) && this.agent(s.agent));
+    // each answer remembers which deliverables it has already updated, so a failure halfway resumes without repeats
+    const pendingFor = (sub) => todo.filter((r) => (!r.subId || r.subId === sub.id) && !(r.appliedTo || []).includes(sub.id));
     let n = 0;
-    for (const sub of subs) {
-      const mine = todo.filter((r) => !r.subId || r.subId === sub.id); const a = this.agent(sub.agent); const d = this.deliverables.get(sub.outputId); if (!a || !d) continue;
+    for (const sub of ready) {
+      const mine = pendingFor(sub); if (!mine.length) continue;
+      const a = this.agent(sub.agent); const d = this.deliverables.get(sub.outputId);
       const feedback = `God has answered what you asked for. Update the deliverable using it, replace the matching assumptions, and keep everything else.\n${mine.map((r) => `Asked: ${r.what}\nAnswer: ${clip(r.answer.text, 3000)}`).join('\n\n')}`;
       if (this.llm.mode === 'mock') {
         d.markdown += `\n\n## Update after God's answers\n${mine.map((r) => `- **${r.what}** Answer received: ${clip(r.answer.text, 300)}. The earlier assumption for this item is replaced by it.`).join('\n')}\n`; d.revised = true;
         this.emit('broadcast', { type: 'deliverable', deliverable: this.deliverableMeta(d) }); this.talk(task, { from: a.id, to: 'god', kind: 'status', text: `Updated my ${sub.skill} with your answer${mine.length > 1 ? 's' : ''}.` });
       } else { await this.revise(task, sub, feedback); }
-      n++;
+      for (const r of mine) (r.appliedTo ||= []).push(sub.id);
+      n++; this.save();
     }
-    for (const r of todo) r.appliedAt = Date.now();
-    task.answersApplied = (task.answersApplied || 0) + todo.length; this.pushTask(task);
-    this.addLog(`Applied ${todo.length} answer(s) to ${n} deliverable(s) on ${taskId}`, { type: 'task', taskId });
+    // an answer is done once it reached every deliverable it was for; one whose workstream left nothing to update is reported, not counted
+    let applied = 0, unmatched = 0;
+    for (const r of todo) {
+      const targets = ready.filter((s) => !r.subId || r.subId === s.id);
+      r.appliedAt = Date.now();
+      if (targets.length) applied++; else { unmatched++; r.unmatched = true; }
+    }
+    task.answersApplied = (task.answersApplied || 0) + applied; this.pushTask(task);
+    this.addLog(`Applied ${applied} answer(s) to ${n} deliverable(s) on ${taskId}${unmatched ? `; ${unmatched} had no finished deliverable to update and stay in the task's context for future work` : ''}`, { type: 'task', taskId });
     this.emit('broadcast', { type: 'requests', requests: this.requestsPublic() }); this.save();
-    return { applied: todo.length, updated: n };
+    return { applied, updated: n, unmatched };
   },
 
   /** A stopped task no longer needs answers: its open requests leave the "needs you" list. */

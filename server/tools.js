@@ -168,12 +168,13 @@ export async function fetchPage(urlInput) {
 }
 
 const PRIORITY = [/pricing|plans/i, /product|platform|solution|service|offering/i, /about|company|who-we/i, /contact|demo|quote|book|get-in-touch/i, /case-stud|customer|success|portfolio|work/i, /industr|sector|use-case/i, /blog|resources|insights|news/i];
-export async function crawlSite(urlInput, { maxPages = 6 } = {}) {
+export async function crawlSite(urlInput, { maxPages = 6, stopped = () => false } = {}) {
   const start = normalizeUrl(urlInput); if (!start) throw new Error('Invalid web address.');
   const pages = []; const errors = [];
   let home;
   try { home = await fetchPage(start); pages.push(home); } catch (e) { return { start, host: new URL(start).hostname, pages, errors: [{ url: start, error: e.message }] }; }
   const origin = new URL(home.url);
+  if (stopped()) return { start, host: origin.hostname.replace(/^www\./, ''), pages, errors, fetchedAt: Date.now(), stopped: true }; // the task was stopped: read no further
   const internal = home.links.filter((l) => l.internal && !l.kind).map((l) => l.url).filter((u) => { try { const x = new URL(u); return x.pathname !== '/' && !/\.(pdf|jpg|jpeg|png|gif|svg|zip|mp4|css|js)$/i.test(x.pathname) && x.pathname !== origin.pathname; } catch { return false; } });
   const ranked = []; const used = new Set();
   for (const re of PRIORITY) { const hit = internal.find((u) => re.test(new URL(u).pathname) && !used.has(u)); if (hit) { ranked.push(hit); used.add(hit); } }

@@ -249,12 +249,13 @@ export const collab = {
     this.talk(task, { from: a.id, to: lead.id, kind: 'question', text: `I'm blocked on ${sub.skill}: ${clip(msg, 160)}. How do you want to handle it?` });
     this.addLog(`${a.name} escalated a failure on ${task.id} to ${lead.name}: ${msg}`, { type: 'system', agent: a.id, taskId: task.id });
     const retry = !sub.retried && this.collab !== 'off';
-    const r = await this.llm.complete({ kind: 'escalate_reply', maxTokens: 160, ...this.toolkit(lead, task, { light: true }), system: this.personaSystem(lead, 'A teammate is blocked. Decide in 1 to 2 sentences: retry with a tighter scope, or proceed without it.'), user: `${a.name} failed at ${sub.skill} on "${task.title}": ${msg}`, ctx: { error: msg, retry } }).catch(() => ({ text: retry ? 'Retry once with a tighter scope.' : 'Proceed without it.' }));
+    const r = await this.llm.complete({ kind: 'escalate_reply', maxTokens: 160, ...this.toolkit(lead, task, { light: true }), system: this.personaSystem(lead, 'A teammate is blocked. Decide in 1 to 2 sentences: retry with a tighter scope, or proceed without it.'), user: `${a.name} failed at ${sub.skill} on "${task.title}": ${msg}`, ctx: { error: msg, retry } }).catch((e) => { if (e?.cancelled) throw e; return { text: retry ? 'Retry once with a tighter scope.' : 'Proceed without it.' }; });
     this.talk(task, { from: lead.id, to: a.id, kind: 'decision', text: r.text });
     if (!retry) { this.learnFromFailure?.(task, sub, msg); return false; }
     sub.retried = true; sub.status = 'ready'; sub.error = null;
     try { await this.runSubtask(task, sub); return true; }
-    catch (e2) { this.talk(task, { from: 'vera', to: 'all', kind: 'decision', text: `${a.short}'s ${sub.skill} failed twice (${clip(String(e2.message || e2), 100)}). We proceed without it and flag the gap in the summary.` }); this.learnFromFailure?.(task, sub, String(e2.message || e2)); return false; }
+    catch (e2) { if (e2?.cancelled) throw e2; // a stop is not a second failure
+      this.talk(task, { from: 'vera', to: 'all', kind: 'decision', text: `${a.short}'s ${sub.skill} failed twice (${clip(String(e2.message || e2), 100)}). We proceed without it and flag the gap in the summary.` }); this.learnFromFailure?.(task, sub, String(e2.message || e2)); return false; }
   },
 
   // ------------------------------------------------------------ the toolbox every agent gets

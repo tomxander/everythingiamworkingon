@@ -116,6 +116,9 @@ export class LLM {
     return mergeModels(this.liveModels);
   }
 
+  /** Set by the company: true once real spend has reached the budget cap. */
+  overBudget() { const cap = this.capFn?.(); return cap != null && this.totals.spent >= cap; }
+
   account(inTok, outTok, cacheRead = 0, real = true) {
     this.totals.calls++;
     this.totals.inputTokens += inTok; this.totals.outputTokens += outTok; this.totals.cacheReadTokens += cacheRead;
@@ -168,7 +171,8 @@ export class LLM {
     let inTotal = 0, outTotal = 0, toolCalls = 0, text = '', continued = false;
     for (let turn = 0; turn < maxTurns + 3; turn++) {
       throwIfCancelled(signal);
-      const useTools = tools && onTool && toolCalls < maxTurns * 2 && turn < maxTurns;
+      // past the budget cap, no more tool rounds: the model finishes with what it has (at most one more request)
+      const useTools = tools && onTool && toolCalls < maxTurns * 2 && turn < maxTurns && !this.overBudget();
       // Thinking (on by default for current models) counts against max_tokens, so short replies get a floor.
       const body = { model: this.model, max_tokens: Math.max(maxTokens || 0, MIN_TOKENS), system: blocks, messages };
       // Once a conversation holds tool calls, every request must still define the tools. To stop further calls, say so with tool_choice.

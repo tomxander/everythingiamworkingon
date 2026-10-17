@@ -40,6 +40,7 @@ export class Company extends EventEmitter {
     this.life = null; this.skillSyncs = [];
     this.history = []; // sparkline samples
     this.budgetCap = Number(process.env.BUDGET_CAP_USD || 5);
+    this.llm.capFn = () => this.budgetCap; // so a call in progress stops using tools once the cap is reached
     this.queue = []; this.active = 0;
     this.completed = 0;
     this.on('comms', (m) => this.addComms(m));
@@ -177,7 +178,7 @@ export class Company extends EventEmitter {
     // only a run that has ended can be restarted; otherwise two runs would share one task (and one would never release its slot)
     if (!['failed', 'interrupted', 'cancelled'].includes(t.status) || this.queue.includes(t) || this.aborts?.has(t.id)) throw new Error(`${id} is not finished yet, so it cannot be retried.`);
     // start clean: nothing from the failed run (warnings, meetings, decisions, discussion, consult counts) should leak into the retry
-    Object.assign(t, { status: 'queued', subtasks: [], plan: null, error: null, warnings: [], meetings: [], decisions: [], thread: [], expertConsults: 0, summaryId: null, intake: null, retro: null, learned: [], profileId: null, sources: [], cancelled: false, pendingDelete: false, finished: null, retried: (t.retried || 0) + 1 });
+    Object.assign(t, { status: 'queued', subtasks: [], plan: null, error: null, warnings: [], meetings: [], decisions: [], thread: [], expertConsults: 0, summaryId: null, intake: null, retro: null, learned: [], profileId: null, sources: [], hires: [], cancelled: false, pendingDelete: false, finished: null, retried: (t.retried || 0) + 1 });
     this.pushTask(t);
     this.queue.push(t); this.pump();
   }
@@ -579,13 +580,15 @@ export class Company extends EventEmitter {
     let profileText = null;
     await this.withAgent(sol, async (tok) => {
       for (const [i, url] of task.urls.entries()) {
+        this.checkpoint(task);
         const host = new URL(url).hostname.replace(/^www\./, '');
         sim.setStatus(sol, `Reading ${host}`);
         await sim.goTo(sol, sim.map.spots.vault[0], { tok }); sol.pose = 'type'; sim.emoteFor(sol, 'magnifier', 4); sim.say(sol, `Reading ${host}…`, 4);
         let entry = this.clients.get(host); let cached = false;
         if (entry && Date.now() - entry.fetchedAt < CLIENT_TTL && entry.snapshot.pages.length) cached = true;
         else {
-          const snapshot = await crawlSite(url, { maxPages: i === 0 ? 6 : 2 });
+          const snapshot = await crawlSite(url, { maxPages: i === 0 ? 6 : 2, stopped: () => task.cancelled });
+          this.checkpoint(task);
           entry = { host, url, fetchedAt: Date.now(), snapshot, profile: null };
           if (snapshot.pages.length) this.clients.set(host, entry);
         }
@@ -599,6 +602,7 @@ export class Company extends EventEmitter {
           continue;
         }
         this.emit('comms', { from: 'sol', to: 'all', kind: 'task', taskId: task.id, text: `Read ${snap.pages.length} page(s) of ${host}${cached ? ' (from cache)' : ''}. ${findings.length} observation(s), for example: ${clip(findings[0] || 'none', 120)}` });
+        this.checkpoint(task);
         if (i === 0 && !entry.profile) {
           const skill = this.skills['product-marketing'];
           const res = await this.llm.complete({
@@ -618,6 +622,7 @@ export class Company extends EventEmitter {
       sol.energy = Math.max(10, sol.energy - 8);
     });
     void profileText;
+    this.checkpoint(task); // a stopped task stays stopping, never back to planning
     task.status = 'planning'; this.pushTask(task);
   }
 
@@ -632,6 +637,7 @@ export class Company extends EventEmitter {
     ];
     const out = []; let ok = 0, found = 0;
     for (const { source, q } of queries) {
+      if (task.cancelled) break; // stopped: no more searches
       try { const results = await webSearch(q, { source, max: 4 }); ok++; found += results.length; out.push({ source, q, results }); this.talk(task, { from: sol.id, to: 'all', kind: 'research', text: `Searched ${source === 'web' ? 'the web' : source} for "${clip(q, 50)}": ${results.length} result(s)` }); }
       catch (e) { out.push({ source, q, results: [], error: clip(e.message, 120) }); }
     }

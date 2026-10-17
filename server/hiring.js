@@ -204,6 +204,8 @@ export const hiring = {
   },
 
   async toolHire(a, task, input) {
+    // a finished task (for example one being revised with God's answers) has no scheduler left to start a new workstream
+    if (!task || !['planning', 'active', 'review'].includes(task.status)) return 'Could not hire: this task has already finished, so a new workstream would never start. Finish your own deliverable and suggest the hire in "Next actions" instead.';
     try {
       const agent = await this.hire(task, { role: input.role, skills: Array.isArray(input.skills) ? input.skills : [], need: input.need, why: input.why, domain: input.domain, assignment: input.assignment }, a.id);
       const named = (Array.isArray(input.skills) ? input.skills : []).some((k) => this.skills[k]);
