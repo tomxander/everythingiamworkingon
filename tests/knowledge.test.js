@@ -36,10 +36,10 @@ test('retrieval prefers the right agent, skill and client, and hides other peopl
   const k = kb();
   k.add({ scope: 'agent', agent: 'theo', skill: 'copywriting', text: 'Rewrite every vague claim into a specific number or example.' });
   k.add({ scope: 'agent', agent: 'rafa', skill: 'seo-audit', text: 'Check canonical tags before recommending any new content pages.' });
-  k.add({ scope: 'client', host: 'acsiatech.com', text: 'Buyers at this client are engineers who distrust marketing language.', skill: null });
+  k.add({ scope: 'client', host: 'example.com', text: 'Buyers at this client are engineers who distrust marketing language.', skill: null });
   k.add({ scope: 'client', host: 'other.com', text: 'This other client only sells to consumers through retail stores.' });
   k.add({ scope: 'team', dept: 'creative', text: 'Test two headline angles before committing to a campaign concept.' });
-  const theo = k.relevant({ agent: 'theo', dept: 'creative', skill: 'copywriting', host: 'acsiatech.com', text: 'homepage headline copy' }).map((l) => l.text);
+  const theo = k.relevant({ agent: 'theo', dept: 'creative', skill: 'copywriting', host: 'example.com', text: 'homepage headline copy' }).map((l) => l.text);
   assert.ok(theo.some((t) => /specific number/.test(t)) && theo.some((t) => /engineers/.test(t)) && theo.some((t) => /two headline angles/.test(t)));
   assert.ok(!theo.some((t) => /canonical/.test(t)), 'rafa\'s lesson is not shown to theo');
   assert.ok(!theo.some((t) => /retail stores/.test(t)), 'other client\'s lesson is not shown');

@@ -37,10 +37,10 @@ test('fetch refuses private targets (SSRF) unless explicitly allowed', async () 
 });
 
 test('url normalisation and extraction from free text', () => {
-  assert.equal(normalizeUrl('Acsiatech.com'), 'https://acsiatech.com/');
+  assert.equal(normalizeUrl('Example.com'), 'https://example.com/');
   assert.equal(normalizeUrl('javascript:alert(1)'), null);
   assert.equal(normalizeUrl('notadomain'), null);
-  assert.deepEqual(extractUrls('go to Acsiatech.com and make them get more leads'), ['https://acsiatech.com/']);
+  assert.deepEqual(extractUrls('go to Example.com and make them get more leads'), ['https://example.com/']);
   assert.deepEqual(extractUrls('see https://www.example.org/pricing, and also foo.io.'), ['https://www.example.org/pricing', 'https://foo.io/']);
   assert.deepEqual(extractUrls('email me at tom@acme.com about e.g. the plan'), []);
   assert.deepEqual(extractUrls('no links here, just 10.5 percent growth'), []);

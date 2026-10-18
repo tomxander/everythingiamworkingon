@@ -43,7 +43,7 @@ test('a queued task stops at once and never runs', async () => {
 
 test('stopping aborts a model call in flight instead of waiting for it', async () => {
   const w = world(); w.llm.apiKey = 'k'; w.llm.setMode('live'); inflight = 0;
-  const t = submit(w, 'Learn about Acsia Technologies');
+  const t = submit(w, 'Learn about Northwind Components');
   const end = Date.now() + 5000; while (!inflight && Date.now() < end) { w.sim.tick(0.1); await new Promise((r) => setTimeout(r, 10)); }
   assert.ok(inflight, 'a call is in flight'); const t0 = Date.now();
   w.company.cancelTask(t.id);

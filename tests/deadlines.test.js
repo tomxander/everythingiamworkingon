@@ -13,8 +13,8 @@ const api = http.createServer((req, res) => {
     if (behaviour === 'dead') { res.statusCode = 401; res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ error: { message: 'invalid x-api-key' } })); }
     const reply = (text) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ stop_reason: 'end_turn', content: [{ type: 'text', text }], usage: { input_tokens: 10, output_tokens: 10 } })); };
     if (/writing the intake brief/.test(sys)) {
-      if (behaviour === 'prose' && j.tools) return reply('I looked into Acsia Technologies. It is an automotive software company in Technopark. Here is my thinking about the objective and what to ask.');
-      return reply(JSON.stringify({ objective: 'Understand Acsia Technologies before the engagement starts', goalType: 'strategy', metric: 'Verified facts about the client', target: 'Not specified', timeframe: '2 weeks', budget: 'Not specified', audience: 'OEM buyers', constraints: [], assumptions: ['Site not read'], openQuestions: ['Which markets matter most?'] }));
+      if (behaviour === 'prose' && j.tools) return reply('I looked into Northwind Components. It is a components maker. Here is my thinking about the objective and what to ask.');
+      return reply(JSON.stringify({ objective: 'Understand Northwind Components before the engagement starts', goalType: 'strategy', metric: 'Verified facts about the client', target: 'Not specified', timeframe: '2 weeks', budget: 'Not specified', audience: 'OEM buyers', constraints: [], assumptions: ['Site not read'], openQuestions: ['Which markets matter most?'] }));
     }
     reply('not json at all'); // plan, work, reviews: unusable
   });
@@ -30,7 +30,7 @@ async function untilPlanned(w, t, ms = 20000) { const end = Date.now() + ms; whi
 test('when the model never answers, planning gives up on a deadline, falls back to a playbook, and says so on the task', async () => {
   behaviour = 'hang'; const w = live(); const toasts = [];
   w.company.on('broadcast', (m) => m.type === 'toast' && toasts.push(m.text));
-  const t = w.company.submitTask({ title: 'Learn about Acsia Technologies Pvt. Ltd. We will be getting them as a client soon.', brief: '' });
+  const t = w.company.submitTask({ title: 'Learn about Northwind Components Ltd. We will be getting them as a client soon.', brief: '' });
   assert.ok(await untilPlanned(w, t), 'planning finished instead of hanging');
   assert.ok(t.subtasks.length >= 3, 'the playbook plan has workstreams');
   assert.ok(t.warnings.some((x) => /intake call failed/i.test(x) && /did not answer/.test(x)), t.warnings.join(' | '));
@@ -41,9 +41,9 @@ test('when the model never answers, planning gives up on a deadline, falls back 
 
 test('an intake answered in prose is retried once, plainly, and the model\'s real brief is used', async () => {
   behaviour = 'prose'; bodies.length = 0; const w = live();
-  const t = w.company.submitTask({ title: 'Learn about Acsia Technologies Pvt. Ltd.', brief: '' });
+  const t = w.company.submitTask({ title: 'Learn about Northwind Components Ltd.', brief: '' });
   assert.ok(await untilPlanned(w, t));
-  assert.equal(t.intake.objective, 'Understand Acsia Technologies before the engagement starts');
+  assert.equal(t.intake.objective, 'Understand Northwind Components before the engagement starts');
   const intakeCalls = bodies.filter((b) => /writing the intake brief/.test(JSON.stringify(b.system)));
   assert.equal(intakeCalls.length, 2); assert.ok(intakeCalls[0].tools && !intakeCalls[1].tools, 'the retry has no tools');
   assert.match(intakeCalls[1].messages[0].content, /JSON object only/);
@@ -52,7 +52,7 @@ test('an intake answered in prose is retried once, plainly, and the model\'s rea
 
 test('when every workstream fails, the card says why and runs a connection test instead of just "failed"', async () => {
   behaviour = 'dead'; const w = live();
-  const t = w.company.submitTask({ title: 'Learn about Acsia Technologies Pvt. Ltd.', brief: '' });
+  const t = w.company.submitTask({ title: 'Learn about Northwind Components Ltd.', brief: '' });
   const end = Date.now() + 60000; while (Date.now() < end && t.status !== 'failed') { w.sim.tick(0.1); await new Promise((r) => setTimeout(r, 20)); }
   assert.equal(t.status, 'failed');
   assert.ok(t.subtasks.length && t.subtasks.every((s) => s.status === 'failed' && s.error), 'each workstream carries an error');

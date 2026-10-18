@@ -19,7 +19,7 @@
 
 <br>
 
-Sixteen specialist agents, in seven teams with their own leads, take a one-line instruction such as *"get acsiatech.com more qualified leads: 40 enquiries a month"* and turn it into researched, reviewed, ready-to-use marketing work. A CMO plans the work. The specialists read the client's site, search the wider internet, ask each other for input, review each other's output, and hire the right person when the team lacks one. When something truly cannot be found, they ask **you**, and carry on without waiting.
+Sixteen specialist agents, in seven teams with their own leads, take a one-line instruction such as *"get example.com more qualified leads: 40 enquiries a month"* and turn it into researched, reviewed, ready-to-use marketing work. A CMO plans the work. The specialists read the client's site, search the wider internet, ask each other for input, review each other's output, and hire the right person when the team lacks one. When something truly cannot be found, they ask **you**, and carry on without waiting.
 
 You watch and steer it all from one place: a live office where the agents walk, talk and work, beside panels for tasks, conversations, requests, people, lessons learned, output and cost.
 
@@ -139,7 +139,7 @@ State, deliverables, client profiles, hires and knowledge are saved to `data/` a
 
 **Stopping and deleting.** Open a task and press **Stop** to halt it: model calls in flight are aborted (API requests are cancelled, `claude` processes are killed), nothing new starts, agents go back to their desks, and its open Inbox requests are withdrawn. Finished deliverables are kept and **Retry** runs it again from scratch. **Delete** removes a task with its deliverables (including the Markdown files), requests and messages; a running task is stopped first. What the team learned from it stays in the knowledge base.
 
-**Writing a good request.** Include the site, the goal and a number: *"Get acsiatech.com more qualified leads: 40 enquiries a month within 90 days. Budget $5k. Buyers are OEM procurement leads. Competitors: …"* The brief field is the place for the baseline, budget, ideal customer and what has already been tried.
+**Writing a good request.** Include the site, the goal and a number: *"Get example.com more qualified leads: 40 enquiries a month within 90 days. Budget $5k. Buyers are procurement managers at mid-size manufacturers. Competitors: …"* The brief field is the place for the baseline, budget, ideal customer and what has already been tried.
 
 ## The team
 
