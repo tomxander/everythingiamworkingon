@@ -8,6 +8,8 @@
 
 ### A marketing agency run by AI agents, with a control room to match.
 
+![Status](https://img.shields.io/badge/status-beta-C98A1B?style=flat-square&labelColor=1B405B)
+![Version](https://img.shields.io/badge/version-0.9.0--beta.1-163144?style=flat-square&labelColor=1B405B)
 ![Node](https://img.shields.io/badge/node-%E2%89%A5%2020-163144?style=flat-square&labelColor=1B405B)
 ![Tests](https://img.shields.io/badge/tests-154%20passing-163144?style=flat-square&labelColor=1B405B)
 ![Dependencies](https://img.shields.io/badge/dependencies-1-163144?style=flat-square&labelColor=1B405B)
@@ -18,6 +20,9 @@
 </div>
 
 <br>
+
+> [!WARNING]
+> **Beta: still being tested.** 4EVR HQ works end to end, but it is not finished. Expect rough edges and changes between versions, and review everything the agents produce before you use it for a real client. If something breaks or looks wrong, please [open an issue](https://github.com/tomxander/everythingiamworkingon/issues).
 
 Sixteen specialist agents, in seven teams with their own leads, take a one-line instruction such as *"get example.com more qualified leads: 40 enquiries a month"* and turn it into researched, reviewed, ready-to-use marketing work. A CMO plans the work. The specialists read the client's site, search the wider internet, ask each other for input, review each other's output, and hire the right person when the team lacks one. When something truly cannot be found, they ask **you**, and carry on without waiting.
 

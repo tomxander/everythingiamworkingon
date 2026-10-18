@@ -1,6 +1,6 @@
 {
   "name": "4evr-hq",
-  "version": "1.0.0",
+  "version": "0.9.0-beta.1",
   "description": "A marketing agency run by AI agents, with a live control room. Specialist agents plan, research, review, hire and learn; you steer from one place.",
   "main": "server/index.js",
   "scripts": {
