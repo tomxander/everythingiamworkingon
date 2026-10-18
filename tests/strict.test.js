@@ -6,14 +6,14 @@ import http from 'node:http';
 import { strictApi, validate } from './strict-api.js';
 process.env.ALLOW_PRIVATE_FETCH = '1'; process.env.SEARCH_GAP_MS = '0';
 
-const web = http.createServer((req, res) => { res.setHeader('content-type', 'text/html'); res.end('<div class="result"><a class="result__a" href="https://northwind.example/">Northwind Components</a><a class="result__snippet">Automotive software</a></div><title>Northwind</title><h1>Northwind</h1>'); });
+const web = http.createServer((req, res) => { res.setHeader('content-type', 'text/html'); res.end('<div class="result"><a class="result__a" href="https://northwind.example/">Northwind Components</a><a class="result__snippet">Industrial components</a></div><title>Northwind</title><h1>Northwind</h1>'); });
 await new Promise((r) => web.listen(0, '127.0.0.1', r));
 const W = `http://127.0.0.1:${web.address().port}`;
 process.env.SEARCH_ENDPOINT = `${W}/s?q={q}`; for (const k of ['NEWS', 'WIKI', 'REDDIT', 'HN']) process.env[`SEARCH_${k}_ENDPOINT`] = `${W}/gone?q={q}`;
 
 const reply = (body) => {
   const sys = JSON.stringify(body.system || '');
-  if (/writing the intake brief/.test(sys)) return JSON.stringify({ objective: 'Understand Northwind Components before the engagement', goalType: 'strategy', metric: 'Verified facts', target: 'Not specified', timeframe: '2 weeks', budget: 'Not specified', audience: 'OEM buyers', constraints: [], assumptions: ['No site given'], openQuestions: ['Which markets matter most?'] });
+  if (/writing the intake brief/.test(sys)) return JSON.stringify({ objective: 'Understand Northwind Components before the engagement', goalType: 'strategy', metric: 'Verified facts', target: 'Not specified', timeframe: '2 weeks', budget: 'Not specified', audience: 'Procurement managers', constraints: [], assumptions: ['No site given'], openQuestions: ['Which markets matter most?'] });
   if (/turn God's request into a plan/.test(sys)) return JSON.stringify({ summary: 'Research Northwind', hires: [], steps: [{ agent: 'sol', skill: 'customer-research', instruction: 'Who buys from Northwind', deps: [], consult: null }, { agent: 'sol', skill: 'competitors', instruction: 'Competitive landscape', deps: [], consult: null }, { agent: 'indigo', skill: 'offers', instruction: 'Core offer', deps: [0], consult: null }, { agent: 'priya', skill: 'content-strategy', instruction: 'Content pillars', deps: [1], consult: null }] });
   if (/peer review/.test(sys)) return JSON.stringify({ verdict: 'revise', strength: 'Specific.', improvement: 'Cite the source for the market claim.' });
   return '# Deliverable\n\n## Assumptions\n- No site given\n\n## Work\nSpecific work for Northwind.\n\n## Next actions\n- Do the thing\n\n## How we will know it worked\n- The metric moves';

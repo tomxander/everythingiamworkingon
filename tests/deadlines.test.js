@@ -14,7 +14,7 @@ const api = http.createServer((req, res) => {
     const reply = (text) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ stop_reason: 'end_turn', content: [{ type: 'text', text }], usage: { input_tokens: 10, output_tokens: 10 } })); };
     if (/writing the intake brief/.test(sys)) {
       if (behaviour === 'prose' && j.tools) return reply('I looked into Northwind Components. It is a components maker. Here is my thinking about the objective and what to ask.');
-      return reply(JSON.stringify({ objective: 'Understand Northwind Components before the engagement starts', goalType: 'strategy', metric: 'Verified facts about the client', target: 'Not specified', timeframe: '2 weeks', budget: 'Not specified', audience: 'OEM buyers', constraints: [], assumptions: ['Site not read'], openQuestions: ['Which markets matter most?'] }));
+      return reply(JSON.stringify({ objective: 'Understand Northwind Components before the engagement starts', goalType: 'strategy', metric: 'Verified facts about the client', target: 'Not specified', timeframe: '2 weeks', budget: 'Not specified', audience: 'Procurement managers', constraints: [], assumptions: ['Site not read'], openQuestions: ['Which markets matter most?'] }));
     }
     reply('not json at all'); // plan, work, reviews: unusable
   });
